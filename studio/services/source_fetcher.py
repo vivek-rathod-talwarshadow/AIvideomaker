@@ -110,8 +110,11 @@ def _scene_prefers_placeholder(scene: dict) -> bool:
 
 def _build_scene_queries(project: VideoProject, scene: dict) -> list[str]:
     scene_text = scene.get("text", "").strip()
+    visual_hint = str(scene.get("visual_hint") or "").strip()
     keyword_phrase = _scene_keyword_phrase(scene_text)
     candidates = [
+        visual_hint,
+        f"{visual_hint} realistic photo" if visual_hint else "",
         keyword_phrase,
         f"{keyword_phrase} realistic photo" if keyword_phrase else "",
         scene_text,

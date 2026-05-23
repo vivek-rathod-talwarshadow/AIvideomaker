@@ -15,7 +15,7 @@ from .logging_service import log_event
 from .renderer import render_slideshow_video
 from .source_fetcher import fetch_scene_assets
 from .subtitles import generate_basic_srt
-from .topic_generator import build_rule_based_topic, estimate_duration_seconds
+from .topic_generator import build_ai_topic, estimate_duration_seconds
 from .uploaders import get_uploader
 from .utils import file_sha1, safe_rmtree, safe_unlink, stable_hash
 from .voiceover import generate_voiceover
@@ -372,12 +372,12 @@ def _ordered_automation_niches() -> list[str]:
 
 def _build_unique_automation_topic() -> ViralTopic:
     for niche in _ordered_automation_niches():
-        candidate = build_rule_based_topic(niche)
+        candidate = build_ai_topic(niche)
         if not _title_used_recently(candidate.title, limit=60):
             return candidate
         candidate.delete()
     fallback_niche = _select_automation_niche()
-    return build_rule_based_topic(fallback_niche)
+    return build_ai_topic(fallback_niche)
 
 
 def _has_pending_project() -> bool:
@@ -448,7 +448,7 @@ def create_daily_project_if_needed() -> VideoProject | None:
 
 def create_project(niche: str = "facts") -> VideoProject:
     niche = niche or _select_automation_niche()
-    topic = build_rule_based_topic(niche)
+    topic = build_ai_topic(niche)
     duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
     target_width, target_height = _project_video_dimensions()
     project = VideoProject.objects.create(
