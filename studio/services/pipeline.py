@@ -721,7 +721,11 @@ def _run_generation_task(project_id: int) -> None:
 def start_generation_async(project: VideoProject) -> None:
     if project.status == JobStatus.GENERATING:
         return
-    set_project_progress(project, 10, "Generation started...")
+    project.status = JobStatus.GENERATING
+    project.failure_reason = ""
+    project.status_message = "Generation started..."
+    project.progress_percent = 10
+    project.save(update_fields=["status", "failure_reason", "status_message", "progress_percent", "updated_at"])
     thread = threading.Thread(target=_run_generation_task, args=(project.id,), daemon=True)
     thread.start()
 
@@ -745,9 +749,51 @@ def _run_upload_task(project_id: int) -> None:
 def start_upload_async(project: VideoProject) -> None:
     if project.status == JobStatus.POSTING:
         return
-    set_project_progress(project, 100, "Video validated. Upload started...")
+    output_ready = bool(project.output_file and Path(project.output_file).exists())
+    project.failure_reason = ""
+    project.status_message = "Video validated. Upload started..."
+    project.progress_percent = 100
+    update_fields = ["failure_reason", "status_message", "progress_percent", "updated_at"]
+    if project.status == JobStatus.READY and output_ready:
+        project.status = JobStatus.POSTING
+        update_fields.insert(0, "status")
+    project.save(update_fields=update_fields)
     thread = threading.Thread(target=_run_upload_task, args=(project.id,), daemon=True)
     thread.start()
+
+
+def dispatch_due_work() -> PublishJob | None:
+    now = timezone.now()
+    job = (
+        PublishJob.objects.select_related("project", "channel")
+        .filter(status=JobStatus.QUEUED, scheduled_for__lte=now)
+        .order_by("scheduled_for", "order_index", "created_at")
+        .first()
+    )
+    if not job:
+        return None
+
+    if not is_platform_enabled(job.channel.platform):
+        return _publish_job(job, now=now)
+
+    blockers = PublishJob.objects.filter(
+        project=job.project,
+        order_index__lt=job.order_index,
+    ).exclude(status=JobStatus.POSTED)
+    if blockers.exists():
+        return None
+
+    project = job.project
+    if project.status == JobStatus.GENERATING or project.status == JobStatus.POSTING:
+        return job
+
+    output_ready = bool(project.output_file and Path(project.output_file).exists())
+    if project.status == JobStatus.READY and output_ready:
+        start_upload_async(project)
+        return job
+
+    start_generation_async(project)
+    return job
 
 
 def process_due_work() -> dict:
@@ -762,7 +808,7 @@ def process_due_work() -> dict:
         cleaned_orphans = cleanup_orphaned_project_media()
         cleaned_projects = cleanup_completed_projects()
         project = create_daily_project_if_needed()
-        job = publish_next_job()
+        job = dispatch_due_work()
         state.last_cycle_at = timezone.now()
         state.last_error = ""
         state.save(update_fields=["last_cycle_at", "last_error", "updated_at"])

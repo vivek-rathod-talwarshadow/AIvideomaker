@@ -7,7 +7,7 @@ from django.db import OperationalError, ProgrammingError
 from django.db.models import Count
 from django.http import FileResponse, Http404, HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
-from django.views.decorators.http import require_GET, require_POST
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
 from .enums import JobStatus, PlatformType
 from .models import EventLog, PublishJob, VideoProject
@@ -84,7 +84,7 @@ def _provider_status_cards() -> list[dict]:
     ]
 
 
-@require_GET
+@require_http_methods(["GET", "HEAD"])
 def dashboard(request: HttpRequest) -> HttpResponse:
     context = {
         "platform_cards": _platform_status_cards(),
