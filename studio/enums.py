@@ -12,6 +12,15 @@ class ContentNiche(models.TextChoices):
     MONEY = "money", "Money Tips"
     GYM = "gym", "Gym Motivation"
     QUOTES = "quotes", "Quotes"
+    SPACE = "space", "Space & Universe"
+    PSYCHOLOGY = "psychology", "Psychology"
+    CRIME = "crime", "Crime Stories"
+    MYTHOLOGY = "mythology", "Mythology"
+    SURVIVAL = "survival", "Survival"
+    ANIMALS = "animals", "Animal Facts"
+    BODY = "body", "Human Body"
+    CELEBRITY = "celebrity", "Celebrity Stories"
+    THEORY = "theory", "Internet Theories"
     DID_YOU_KNOW = "did-you-know", "Did You Know"
 
 

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
+
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 from googleapiclient.http import MediaFileUpload
 from django.conf import settings
 
@@ -11,6 +14,36 @@ from .utils import truncate_text
 
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 YOUTUBE_TOKEN_URI = "https://oauth2.googleapis.com/token"
+
+
+def _extract_http_error_message(exc: HttpError) -> str:
+    try:
+        payload = json.loads(exc.content.decode("utf-8"))
+    except (AttributeError, UnicodeDecodeError, json.JSONDecodeError):
+        return str(exc)
+
+    error = payload.get("error", {})
+    message = error.get("message")
+    if message:
+        return message
+    errors = error.get("errors") or []
+    if errors:
+        reason = errors[0].get("reason") or errors[0].get("message")
+        if reason:
+            return str(reason)
+    return str(exc)
+
+
+def _is_daily_upload_limit_error(message: str) -> bool:
+    normalized = message.lower()
+    return any(
+        marker in normalized
+        for marker in [
+            "daily upload limit reached",
+            "uploadlimitexceeded",
+            "dailylimitexceeded",
+        ]
+    )
 
 
 def build_youtube_credentials() -> Credentials:
@@ -75,8 +108,16 @@ def upload_youtube_short(project) -> str:
         media_body=MediaFileUpload(project.output_file, chunksize=-1, resumable=True),
     )
     response = None
-    while response is None:
-        _, response = request.next_chunk()
+    try:
+        while response is None:
+            _, response = request.next_chunk()
+    except HttpError as exc:
+        message = _extract_http_error_message(exc)
+        if _is_daily_upload_limit_error(message):
+            raise RuntimeError(
+                "YouTube daily upload limit reached. Waiting until the next day before retrying."
+            ) from exc
+        raise RuntimeError(f"YouTube upload failed: {message}") from exc
 
     video_id = response.get("id")
     if not video_id:

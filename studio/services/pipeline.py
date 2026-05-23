@@ -21,6 +21,27 @@ from .utils import safe_rmtree, safe_unlink
 from .voiceover import generate_voiceover
 
 
+AUTOMATION_NICHE_ORDER = (
+    "facts",
+    "horror",
+    "space",
+    "psychology",
+    "money",
+    "ai",
+    "tech",
+    "crime",
+    "mythology",
+    "survival",
+    "animals",
+    "body",
+    "celebrity",
+    "motivation",
+    "gym",
+    "quotes",
+    "theory",
+)
+
+
 def acquire_lock(key: str) -> bool:
     now = timezone.now()
     ttl = now + timedelta(seconds=settings.JOB_LOCK_TTL_SECONDS)
@@ -90,6 +111,40 @@ def pause_automation() -> AutomationState:
     return state
 
 
+def _next_local_day_start(now=None):
+    now = now or timezone.now()
+    local_now = timezone.localtime(now)
+    next_day = (local_now + timedelta(days=1)).date()
+    naive_start = timezone.datetime.combine(next_day, timezone.datetime.min.time())
+    return timezone.make_aware(naive_start, timezone.get_current_timezone())
+
+
+def _youtube_limit_reached() -> bool:
+    return False
+
+
+def _should_retry_after_exception(exc: Exception) -> bool:
+    normalized = str(exc).lower()
+    return "youtube daily upload limit reached" not in normalized
+
+
+def _defer_job(job: PublishJob, scheduled_for, reason: str, event_type: str = "publish.deferred") -> PublishJob:
+    job.status = JobStatus.QUEUED
+    job.last_error = reason
+    job.finished_at = None
+    job.scheduled_for = scheduled_for
+    job.save(update_fields=["status", "last_error", "finished_at", "scheduled_for", "updated_at"])
+
+    project = job.project
+    project.status = JobStatus.QUEUED
+    project.failure_reason = ""
+    project.status_message = reason[:255]
+    project.save(update_fields=["status", "failure_reason", "status_message", "updated_at"])
+
+    log_event(event_type, reason, project=project, publish_job=job)
+    return job
+
+
 def _schedule_retry(job: PublishJob, exc: Exception) -> PublishJob:
     state = get_automation_state()
     retry_limit = max(0, settings.AUTOMATION_RETRY_LIMIT)
@@ -104,16 +159,21 @@ def _schedule_retry(job: PublishJob, exc: Exception) -> PublishJob:
     project.status_message = "Generation or upload failed."
     project.progress_percent = 100
     project.save(update_fields=["status", "failure_reason", "status_message", "progress_percent", "updated_at"])
-    purge_project_media(project)
 
-    should_retry = state.retry_failures and job.retry_count <= retry_limit
+    should_retry = state.retry_failures and job.retry_count <= retry_limit and _should_retry_after_exception(exc)
     if should_retry:
+        keep_existing_video = bool(project.output_file and Path(project.output_file).exists())
+        if not keep_existing_video:
+            purge_project_media(project)
         job.status = JobStatus.QUEUED
         job.finished_at = None
         job.scheduled_for = next_retry
         job.save(update_fields=["status", "retry_count", "last_error", "finished_at", "scheduled_for", "updated_at"])
         project.status = JobStatus.QUEUED
-        project.status_message = f"Retrying automatically in {settings.AUTOMATION_RETRY_DELAY_SECONDS} seconds."
+        if keep_existing_video:
+            project.status_message = f"Retrying the same uploaded video in {settings.AUTOMATION_RETRY_DELAY_SECONDS} seconds."
+        else:
+            project.status_message = f"Retrying automatically in {settings.AUTOMATION_RETRY_DELAY_SECONDS} seconds."
         project.progress_percent = 0
         project.save(update_fields=["status", "status_message", "progress_percent", "updated_at"])
         log_event(
@@ -124,6 +184,7 @@ def _schedule_retry(job: PublishJob, exc: Exception) -> PublishJob:
             publish_job=job,
         )
     else:
+        purge_project_media(project)
         job.status = JobStatus.FAILED
         job.save(update_fields=["status", "retry_count", "last_error", "finished_at", "updated_at"])
         log_event("publish.failed", str(exc), level="error", project=project, publish_job=job)
@@ -159,8 +220,29 @@ def get_or_create_default_channel(platform: str) -> ChannelProfile:
             channel.name = expected_name
             channel.save(update_fields=["name", "updated_at"])
         return channel
-    channel = ChannelProfile.objects.create(platform=platform, name=defaults[platform], is_active=True)
+    create_kwargs = {"platform": platform, "name": defaults[platform], "is_active": True}
+    channel = ChannelProfile.objects.create(**create_kwargs)
     return channel
+
+
+def _select_automation_niche() -> str:
+    recent_niches = list(
+        VideoProject.objects.order_by("-created_at").values_list("niche", flat=True)[: len(AUTOMATION_NICHE_ORDER) * 2]
+    )
+    for niche in AUTOMATION_NICHE_ORDER:
+        if niche not in recent_niches:
+            return niche
+    latest_niche = recent_niches[0] if recent_niches else ""
+    for niche in AUTOMATION_NICHE_ORDER:
+        if niche != latest_niche:
+            return niche
+    return AUTOMATION_NICHE_ORDER[0]
+
+
+def _has_pending_project() -> bool:
+    return VideoProject.objects.filter(
+        status__in=[JobStatus.QUEUED, JobStatus.GENERATING, JobStatus.READY, JobStatus.POSTING]
+    ).exists()
 
 
 def create_daily_project_if_needed() -> VideoProject | None:
@@ -176,8 +258,14 @@ def create_daily_project_if_needed() -> VideoProject | None:
             level="error",
         )
         return None
+    if _has_pending_project():
+        log_event(
+            "automation.skipped",
+            "Automation did not create a new project because an older video is still pending upload or retry.",
+        )
+        return None
 
-    topic = build_rule_based_topic("facts")
+    topic = build_rule_based_topic(_select_automation_niche())
     duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
     project = VideoProject.objects.create(
         topic=topic,
@@ -215,6 +303,7 @@ def create_daily_project_if_needed() -> VideoProject | None:
 
 
 def create_project(niche: str = "facts") -> VideoProject:
+    niche = niche or _select_automation_niche()
     topic = build_rule_based_topic(niche)
     duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
     project = VideoProject.objects.create(
@@ -282,11 +371,10 @@ def generate_project_media(project: VideoProject) -> None:
     project.duration_seconds = estimate_duration_seconds(project.topic.script, project.topic.scene_plan)
     project.save(update_fields=["status", "failure_reason", "duration_seconds", "updated_at"])
     set_project_progress(project, 15, "Preparing scene assets...")
-    should_refresh_assets = (not project.assets.exists()) or not project.assets.filter(
-        metadata__placeholder=False
-    ).exists()
+    assets = list(project.assets.all())
+    should_refresh_assets = (not assets) or any(not Path(asset.local_path).exists() for asset in assets if asset.local_path)
     if should_refresh_assets:
-        fetch_scene_assets(project, replace_existing=project.assets.exists())
+        fetch_scene_assets(project, replace_existing=bool(assets))
     set_project_progress(project, 35, "Generating voiceover...")
     log_event("project.voiceover_started", "Generating AI voiceover.", project=project)
     generate_voiceover(project)
@@ -301,9 +389,10 @@ def generate_project_media(project: VideoProject) -> None:
 
 def purge_project_media(project: VideoProject) -> bool:
     cleanup_ok = True
-    for asset in project.assets.all():
+    for asset in list(project.assets.all()):
         if asset.local_path:
             cleanup_ok = safe_unlink(asset.local_path) and cleanup_ok
+    project.assets.all().delete()
 
     for path in [project.voiceover_file, project.subtitle_file, project.music_file, project.output_file]:
         if path:
@@ -328,6 +417,26 @@ def purge_project_media(project: VideoProject) -> bool:
     return cleanup_ok
 
 
+def cleanup_orphaned_project_media() -> int:
+    cleaned = 0
+    projects_root = Path(settings.MEDIA_ROOT) / "projects"
+    if not projects_root.exists():
+        return cleaned
+
+    for child in projects_root.iterdir():
+        if not child.is_dir():
+            continue
+        try:
+            project_id = int(child.name)
+        except ValueError:
+            if safe_rmtree(child):
+                cleaned += 1
+            continue
+        if not VideoProject.objects.filter(id=project_id).exists() and safe_rmtree(child):
+            cleaned += 1
+    return cleaned
+
+
 def delete_project_record(project: VideoProject, reason: str) -> None:
     project_id = project.id
     topic = project.topic
@@ -339,6 +448,7 @@ def delete_project_record(project: VideoProject, reason: str) -> None:
         payload={"project_id": project_id, "title": title, "reason": reason},
     )
     project.delete()
+    cleanup_orphaned_project_media()
     if not topic.projects.exists():
         topic.delete()
 
@@ -391,7 +501,6 @@ def _publish_job(job: PublishJob, now=None) -> PublishJob | None:
         job.project.refresh_from_db()
         if job.project.status != JobStatus.READY or job.project.progress_percent < 100 or not job.project.output_file:
             raise RuntimeError("Upload blocked because the video did not finish generating successfully.")
-
         job.status = JobStatus.POSTING
         job.started_at = now
         job.save(update_fields=["status", "started_at", "updated_at"])
@@ -413,6 +522,13 @@ def _publish_job(job: PublishJob, now=None) -> PublishJob | None:
             delete_project_record(job.project, reason="successful upload")
         return job
     except Exception as exc:
+        if not _should_retry_after_exception(exc):
+            return _defer_job(
+                job,
+                _next_local_day_start(now),
+                str(exc),
+                event_type="publish.rate_limited",
+            )
         return _schedule_retry(job, exc)
 
 
@@ -518,6 +634,7 @@ def process_due_work() -> dict:
         if not state.is_enabled:
             return {"ok": True, "detail": "automation-paused"}
 
+        cleaned_orphans = cleanup_orphaned_project_media()
         cleaned_projects = cleanup_completed_projects()
         project = create_daily_project_if_needed()
         job = publish_next_job()
@@ -531,6 +648,7 @@ def process_due_work() -> dict:
                 "created_project_id": getattr(project, "id", None),
                 "processed_job_id": getattr(job, "id", None),
                 "cleaned_projects": cleaned_projects,
+                "cleaned_orphan_media_dirs": cleaned_orphans,
             },
         )
         return {
@@ -538,6 +656,7 @@ def process_due_work() -> dict:
             "created_project_id": getattr(project, "id", None),
             "processed_job_id": getattr(job, "id", None),
             "cleaned_projects": cleaned_projects,
+            "cleaned_orphan_media_dirs": cleaned_orphans,
         }
     except Exception as exc:
         state = get_automation_state()
