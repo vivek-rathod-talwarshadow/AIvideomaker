@@ -639,6 +639,13 @@
         </section>
     </div>
     <script>
+        let statusPollTimer = null;
+        let latestPollConfig = {
+            active: 8000,
+            idle: 30000,
+            hidden: 120000,
+        };
+
         const badgeTone = (status) => {
             if (["ready", "posted"].includes(status)) return "badge-ok";
             if (["failed", "skipped"].includes(status)) return "badge-off";
@@ -658,11 +665,30 @@
             return map[status] || "Idle";
         };
 
+        const nextPollDelay = (status) => {
+            if (document.hidden) return latestPollConfig.hidden;
+            if (["generating", "posting", "queued", "ready"].includes(status)) return latestPollConfig.active;
+            return latestPollConfig.idle;
+        };
+
+        const scheduleDashboardRefresh = (status = "idle") => {
+            window.clearTimeout(statusPollTimer);
+            statusPollTimer = window.setTimeout(refreshDashboardStatus, nextPollDelay(status));
+        };
+
         async function refreshDashboardStatus() {
             try {
                 const response = await fetch("{% url 'dashboard-status' %}");
                 const data = await response.json();
-                if (!data.has_project) return;
+                latestPollConfig = {
+                    active: data.active_poll_ms || latestPollConfig.active,
+                    idle: data.idle_poll_ms || latestPollConfig.idle,
+                    hidden: data.hidden_poll_ms || latestPollConfig.hidden,
+                };
+                if (!data.has_project) {
+                    scheduleDashboardRefresh("idle");
+                    return;
+                }
 
                 const workflowBadge = document.getElementById("workflow-badge");
                 const currentJobBadge = document.getElementById("current-job-badge");
@@ -793,12 +819,15 @@
                         });
                     }
                 }
+                scheduleDashboardRefresh(data.status || "idle");
             } catch (error) {
                 console.error("Status refresh failed", error);
+                scheduleDashboardRefresh("idle");
             }
         }
 
-        setInterval(refreshDashboardStatus, 2500);
+        document.addEventListener("visibilitychange", () => scheduleDashboardRefresh("idle"));
+        scheduleDashboardRefresh("idle");
     </script>
 </body>
 </html>

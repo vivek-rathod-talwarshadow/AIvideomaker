@@ -42,6 +42,20 @@ AUTOMATION_NICHE_ORDER = (
 )
 
 
+PROVIDER_BUDGET_ERROR_MARKERS = (
+    "quota exceeded",
+    "free usage limit reached",
+    "service is now suspended until the next billing period",
+    "upgrade your plan to restore your service",
+    "billing details",
+    "credit balance is too low",
+    "insufficient credits",
+    "rate limit exceeded for requests",
+    "exceeded your current quota",
+    "resource has been exhausted",
+)
+
+
 def _project_video_dimensions() -> tuple[int, int]:
     width = max(360, int(getattr(settings, "DEFAULT_VIDEO_WIDTH", 720)))
     height = max(640, int(getattr(settings, "DEFAULT_VIDEO_HEIGHT", 1280)))
@@ -237,6 +251,31 @@ def _youtube_limit_reached() -> bool:
 def _should_retry_after_exception(exc: Exception) -> bool:
     normalized = str(exc).lower()
     return "youtube daily upload limit reached" not in normalized
+
+
+def _is_provider_budget_exhausted_error(exc: Exception) -> bool:
+    normalized = str(exc).lower()
+    return any(marker in normalized for marker in PROVIDER_BUDGET_ERROR_MARKERS)
+
+
+def _pause_automation_for_budget_error(exc: Exception) -> None:
+    state = get_automation_state()
+    if not state.is_enabled:
+        return
+    state.is_enabled = False
+    state.auto_upload = False
+    state.last_paused_at = timezone.now()
+    state.last_error = (
+        "Automation paused to avoid burning provider or hosting free-tier limits. "
+        f"Latest error: {exc}"
+    )
+    state.save(update_fields=["is_enabled", "auto_upload", "last_paused_at", "last_error", "updated_at"])
+    log_event(
+        "automation.paused_budget_guard",
+        "Automation paused automatically after a quota, billing, or free-tier usage limit error.",
+        level="error",
+        payload={"error": str(exc)},
+    )
 
 
 def _defer_job(job: PublishJob, scheduled_for, reason: str, event_type: str = "publish.deferred") -> PublishJob:
@@ -895,6 +934,9 @@ def process_due_work() -> dict:
         }
     except Exception as exc:
         state = get_automation_state()
+        if _is_provider_budget_exhausted_error(exc):
+            _pause_automation_for_budget_error(exc)
+            state = get_automation_state()
         state.last_error = str(exc)
         state.save(update_fields=["last_error", "updated_at"])
         log_event("automation.cycle_failed", str(exc), level="error")

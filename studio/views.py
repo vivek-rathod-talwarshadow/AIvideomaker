@@ -191,6 +191,11 @@ def healthcheck(request: HttpRequest) -> HttpResponse:
 
 
 @require_GET
+def favicon(request: HttpRequest) -> HttpResponse:
+    return HttpResponse(status=204)
+
+
+@require_GET
 def dashboard_status(request: HttpRequest) -> HttpResponse:
     try:
         project = VideoProject.objects.select_related("topic").order_by("-created_at").first()
@@ -206,6 +211,9 @@ def dashboard_status(request: HttpRequest) -> HttpResponse:
                 "automation_enabled": automation_state.is_enabled,
                 "automation_last_cycle_at": automation_state.last_cycle_at.isoformat() if automation_state.last_cycle_at else "",
                 "automation_last_error": automation_state.last_error,
+                "active_poll_ms": getattr(settings, "DASHBOARD_STATUS_ACTIVE_POLL_MS", 8000),
+                "idle_poll_ms": getattr(settings, "DASHBOARD_STATUS_IDLE_POLL_MS", 30000),
+                "hidden_poll_ms": getattr(settings, "DASHBOARD_STATUS_HIDDEN_POLL_MS", 120000),
                 "recent_logs": [
                     {
                         "level": log.level,
@@ -234,6 +242,9 @@ def dashboard_status(request: HttpRequest) -> HttpResponse:
             "automation_enabled": automation_state.is_enabled,
             "automation_last_cycle_at": automation_state.last_cycle_at.isoformat() if automation_state.last_cycle_at else "",
             "automation_last_error": automation_state.last_error,
+            "active_poll_ms": getattr(settings, "DASHBOARD_STATUS_ACTIVE_POLL_MS", 8000),
+            "idle_poll_ms": getattr(settings, "DASHBOARD_STATUS_IDLE_POLL_MS", 30000),
+            "hidden_poll_ms": getattr(settings, "DASHBOARD_STATUS_HIDDEN_POLL_MS", 120000),
             "recent_projects": [
                 {
                     "title": item.topic.title,

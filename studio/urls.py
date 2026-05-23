@@ -5,6 +5,7 @@ from .views import (
     automation_start,
     dashboard,
     dashboard_status,
+    favicon,
     healthcheck,
     preview_video,
     run_automation_now,
@@ -16,6 +17,7 @@ from .views import (
 
 urlpatterns = [
     path("", dashboard, name="dashboard"),
+    path("favicon.ico", favicon, name="favicon"),
     path("health/", healthcheck, name="healthcheck"),
     path("dashboard/status/", dashboard_status, name="dashboard-status"),
     path("dashboard/automation/start/", automation_start, name="automation-start"),
