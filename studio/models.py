@@ -68,6 +68,8 @@ class VideoProject(TimeStampedModel):
     subtitle_file = models.CharField(max_length=255, blank=True)
     voiceover_file = models.CharField(max_length=255, blank=True)
     music_file = models.CharField(max_length=255, blank=True)
+    content_signature = models.CharField(max_length=40, blank=True)
+    output_fingerprint = models.CharField(max_length=40, blank=True)
     failure_reason = models.TextField(blank=True)
     progress_percent = models.PositiveIntegerField(default=0)
     status_message = models.CharField(max_length=255, blank=True)

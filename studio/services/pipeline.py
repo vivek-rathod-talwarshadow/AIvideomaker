@@ -10,14 +10,14 @@ from django.db import transaction
 from django.utils import timezone
 
 from studio.enums import JobStatus, PlatformType
-from studio.models import AutomationState, ChannelProfile, PublishJob, SchedulerLock, VideoProject
+from studio.models import AutomationState, ChannelProfile, EventLog, PublishJob, SchedulerLock, VideoProject
 from .logging_service import log_event
 from .renderer import render_slideshow_video
 from .source_fetcher import fetch_scene_assets
 from .subtitles import generate_basic_srt
 from .topic_generator import build_rule_based_topic, estimate_duration_seconds
 from .uploaders import get_uploader
-from .utils import safe_rmtree, safe_unlink
+from .utils import file_sha1, safe_rmtree, safe_unlink, stable_hash
 from .voiceover import generate_voiceover
 
 
@@ -66,6 +66,88 @@ def set_project_progress(project: VideoProject, percent: int, message: str) -> N
     project.progress_percent = max(0, min(100, percent))
     project.status_message = message[:255]
     project.save(update_fields=["progress_percent", "status_message", "updated_at"])
+
+
+def _project_content_signature(project: VideoProject) -> str:
+    if project.content_signature:
+        return project.content_signature
+    normalized_script = " ".join((project.topic.script or "").lower().split())
+    signature = stable_hash([project.niche, project.topic.title.strip().lower(), normalized_script])
+    project.content_signature = signature
+    project.save(update_fields=["content_signature", "updated_at"])
+    return signature
+
+
+def _ensure_output_fingerprint(project: VideoProject) -> str:
+    if project.output_fingerprint:
+        return project.output_fingerprint
+    if not project.output_file or not Path(project.output_file).exists():
+        return ""
+    fingerprint = file_sha1(project.output_file)
+    project.output_fingerprint = fingerprint
+    project.save(update_fields=["output_fingerprint", "updated_at"])
+    return fingerprint
+
+
+def _channel_upload_gap_minutes(channel: ChannelProfile) -> int:
+    configured_gap = max(0, getattr(settings, "YOUTUBE_MIN_UPLOAD_GAP_MINUTES", 0))
+    channel_gap = max(0, channel.cooldown_minutes)
+    return max(configured_gap, channel_gap) if channel.platform == PlatformType.YOUTUBE else channel_gap
+
+
+def _recent_channel_post(channel: ChannelProfile, now=None):
+    now = now or timezone.now()
+    gap_minutes = _channel_upload_gap_minutes(channel)
+    if gap_minutes <= 0:
+        return None
+    return (
+        EventLog.objects.filter(
+            event_type="publish.success",
+            payload__platform=channel.platform,
+            created_at__gte=now - timedelta(minutes=gap_minutes),
+        )
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def _find_duplicate_uploaded_project(project: VideoProject):
+    signature = _project_content_signature(project)
+    duplicate_log = (
+        EventLog.objects.filter(
+            event_type__in=["publish.success", "project.deleted"],
+            payload__content_signature=signature,
+        )
+        .exclude(project_id=project.id)
+        .order_by("-created_at")
+        .first()
+    )
+    if duplicate_log:
+        return duplicate_log
+
+    fingerprint = _ensure_output_fingerprint(project)
+    if not fingerprint:
+        return None
+    return (
+        EventLog.objects.filter(
+            event_type__in=["publish.success", "project.deleted"],
+            payload__output_fingerprint=fingerprint,
+        )
+        .exclude(project_id=project.id)
+        .order_by("-created_at")
+        .first()
+    )
+
+
+def _drop_duplicate_project(job: PublishJob, reason: str) -> PublishJob:
+    project = job.project
+    job.status = JobStatus.SKIPPED
+    job.last_error = reason
+    job.finished_at = timezone.now()
+    job.save(update_fields=["status", "last_error", "finished_at", "updated_at"])
+    log_event("publish.duplicate_blocked", reason, level="error", project=project, publish_job=job)
+    delete_project_record(project, reason="duplicate upload blocked")
+    return job
 
 
 def youtube_upload_configured() -> bool:
@@ -271,6 +353,7 @@ def create_daily_project_if_needed() -> VideoProject | None:
         topic=topic,
         niche=topic.niche,
         status=JobStatus.QUEUED,
+        content_signature=stable_hash([topic.niche, topic.title.strip().lower(), " ".join(topic.script.lower().split())]),
         duration_seconds=duration_seconds,
         progress_percent=5,
         status_message="Project created and waiting to generate.",
@@ -310,6 +393,7 @@ def create_project(niche: str = "facts") -> VideoProject:
         topic=topic,
         niche=topic.niche,
         status=JobStatus.QUEUED,
+        content_signature=stable_hash([topic.niche, topic.title.strip().lower(), " ".join(topic.script.lower().split())]),
         duration_seconds=duration_seconds,
         caption_style={
             "font_size": 60,
@@ -383,6 +467,7 @@ def generate_project_media(project: VideoProject) -> None:
     set_project_progress(project, 75, "Rendering slideshow video...")
     log_event("project.render_started", "Rendering animated video with captions.", project=project)
     render_slideshow_video(project)
+    _ensure_output_fingerprint(project)
     set_project_progress(project, 100, "Preview ready for upload.")
     log_event("project.rendered", "Project assets and video generated.", project=project)
 
@@ -404,7 +489,10 @@ def purge_project_media(project: VideoProject) -> bool:
     project.voiceover_file = ""
     project.subtitle_file = ""
     project.music_file = ""
-    project.save(update_fields=["output_file", "voiceover_file", "subtitle_file", "music_file", "updated_at"])
+    project.output_fingerprint = ""
+    project.save(
+        update_fields=["output_file", "voiceover_file", "subtitle_file", "music_file", "output_fingerprint", "updated_at"]
+    )
     if cleanup_ok:
         log_event("project.cleaned", "Project media files and folders were deleted.", project=project)
     else:
@@ -441,11 +529,19 @@ def delete_project_record(project: VideoProject, reason: str) -> None:
     project_id = project.id
     topic = project.topic
     title = project.topic.title
+    content_signature = project.content_signature or _project_content_signature(project)
+    output_fingerprint = project.output_fingerprint or _ensure_output_fingerprint(project)
     purge_project_media(project)
     log_event(
         "project.deleted",
         f"Project '{title}' was removed after {reason}.",
-        payload={"project_id": project_id, "title": title, "reason": reason},
+        payload={
+            "project_id": project_id,
+            "title": title,
+            "reason": reason,
+            "content_signature": content_signature,
+            "output_fingerprint": output_fingerprint,
+        },
     )
     project.delete()
     cleanup_orphaned_project_media()
@@ -501,6 +597,21 @@ def _publish_job(job: PublishJob, now=None) -> PublishJob | None:
         job.project.refresh_from_db()
         if job.project.status != JobStatus.READY or job.project.progress_percent < 100 or not job.project.output_file:
             raise RuntimeError("Upload blocked because the video did not finish generating successfully.")
+        recent_post = _recent_channel_post(job.channel, now=now)
+        if recent_post:
+            next_slot = recent_post.created_at + timedelta(minutes=_channel_upload_gap_minutes(job.channel))
+            return _defer_job(
+                job,
+                next_slot,
+                f"Upload cooldown active. Waiting until {timezone.localtime(next_slot).strftime('%Y-%m-%d %H:%M:%S')} before the next YouTube upload.",
+                event_type="publish.cooldown",
+            )
+        duplicate_project = _find_duplicate_uploaded_project(job.project)
+        if duplicate_project:
+            return _drop_duplicate_project(
+                job,
+                "Blocked duplicate upload because the same content or rendered video was already posted before.",
+            )
         job.status = JobStatus.POSTING
         job.started_at = now
         job.save(update_fields=["status", "started_at", "updated_at"])
@@ -512,7 +623,21 @@ def _publish_job(job: PublishJob, now=None) -> PublishJob | None:
         job.remote_post_id = result.remote_post_id
         job.finished_at = timezone.now()
         job.save(update_fields=["status", "remote_post_id", "finished_at", "updated_at"])
-        log_event("publish.success", f"Uploaded to {job.channel.platform}.", project=job.project, publish_job=job)
+        log_event(
+            "publish.success",
+            f"Uploaded to {job.channel.platform}.",
+            project=job.project,
+            publish_job=job,
+            payload={
+                "platform": job.channel.platform,
+                "channel_id": job.channel_id,
+                "project_id": job.project_id,
+                "title": job.project.topic.title,
+                "content_signature": _project_content_signature(job.project),
+                "output_fingerprint": _ensure_output_fingerprint(job.project),
+                "remote_post_id": job.remote_post_id,
+            },
+        )
 
         if not job.project.publish_jobs.exclude(status=JobStatus.POSTED).exists():
             job.project.status = JobStatus.POSTED

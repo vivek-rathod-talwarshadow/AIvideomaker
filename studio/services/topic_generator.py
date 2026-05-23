@@ -6,6 +6,7 @@ import re
 
 from studio.enums import ContentNiche
 from studio.models import EventLog, ViralTopic
+from .utils import stable_hash
 
 
 def _topic(
@@ -643,6 +644,7 @@ def build_rule_based_topic(niche: str) -> ViralTopic:
     script = "\n".join(script_lines)
     scene_plan = build_scene_plan(hook, beats, cta)
     duration_seconds = estimate_duration_seconds(script, scene_plan)
+    content_signature = stable_hash([niche, title.strip().lower(), " ".join(script.lower().split())])
     return ViralTopic.objects.create(
         niche=niche,
         title=title,
@@ -652,6 +654,6 @@ def build_rule_based_topic(niche: str) -> ViralTopic:
         seo_title=f"{title} | DarkBrainScroll",
         description=script,
         hashtags=template.get("hashtags", [f"#{niche}", "#shorts", "#viral"]),
-        source_notes=[*template.get("source_notes", []), f"estimated-duration:{duration_seconds}"],
+        source_notes=[*template.get("source_notes", []), f"estimated-duration:{duration_seconds}", f"content-signature:{content_signature}"],
         is_trending=False,
     )

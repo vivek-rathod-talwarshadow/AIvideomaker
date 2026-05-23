@@ -35,6 +35,17 @@ def stable_hash(parts: Iterable[str]) -> str:
     return digest[:16]
 
 
+def file_sha1(path: str | Path, chunk_size: int = 1024 * 1024) -> str:
+    digest = hashlib.sha1()
+    with Path(path).open("rb") as handle:
+        while True:
+            chunk = handle.read(chunk_size)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def safe_unlink(path: str | Path, retries: int = 6, delay_seconds: float = 0.5) -> bool:
     path_obj = Path(path)
     for attempt in range(retries):
