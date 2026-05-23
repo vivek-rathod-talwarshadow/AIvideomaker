@@ -317,8 +317,20 @@ def automation_pause(request: HttpRequest) -> HttpResponse:
 @require_POST
 def start_new_project(request: HttpRequest) -> HttpResponse:
     from .services.pipeline import create_project
+    from .services.logging_service import log_event
 
-    project = create_project()
+    try:
+        project = create_project()
+    except Exception as exc:
+        log_event(
+            "project.create_failed",
+            "Manual project creation failed from dashboard.",
+            level="error",
+            payload={"error": str(exc)},
+        )
+        messages.error(request, f"Could not create a new video: {exc}")
+        return redirect("dashboard")
+
     messages.success(request, f"Created project #{project.id}: {project.topic.title}")
     return redirect("dashboard")
 
