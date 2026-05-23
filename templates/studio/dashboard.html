@@ -3,7 +3,7 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>ViralForge Dashboard</title>
+    <title>DarkBrainScroll Automation</title>
     <style>
         :root {
             --panel: rgba(255, 250, 242, 0.86);
@@ -113,6 +113,35 @@
             background: var(--success-soft);
             color: var(--success);
             border: 1px solid rgba(32, 98, 70, 0.16);
+        }
+
+        .progress-shell {
+            margin-top: 16px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 14px;
+            border-radius: 999px;
+            background: rgba(47, 36, 28, 0.10);
+            overflow: hidden;
+            border: 1px solid var(--line);
+        }
+
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #f97316, #facc15);
+            transition: width 0.35s ease;
+        }
+
+        .progress-meta {
+            margin-top: 8px;
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 0.9rem;
+            color: var(--muted);
         }
 
         .grid-stats,
@@ -291,17 +320,51 @@
     <div class="shell">
         <section class="hero">
             <div>
-                <h1>ViralForge Control Room</h1>
-                <p>Monitor generation, preview, upload status, and cleanup from one place. The current workflow is tuned for YouTube Shorts only.</p>
+                <h1>DarkBrainScroll Control Room</h1>
+                <p>Monitor generation, automatic YouTube uploads, cleanup, retries, and error logs from one place.</p>
             </div>
             <div class="hero-actions">
                 <div class="action-card">
                     <div class="muted">Workflow state</div>
-                    <h3 style="margin: 8px 0 0;">Create, preview, then upload to YouTube</h3>
+                    <h3 style="margin: 8px 0 0;">Generate, validate, upload, and clean automatically</h3>
                     <div style="margin-top: 12px;">
-                        <span class="badge {% if workflow_tone == 'ok' %}badge-ok{% elif workflow_tone == 'warn' %}badge-warn{% else %}badge-off{% endif %}">{{ workflow_state|default:"Idle" }}</span>
+                        <span id="workflow-badge" class="badge {% if workflow_tone == 'ok' %}badge-ok{% elif workflow_tone == 'warn' %}badge-warn{% else %}badge-off{% endif %}">{{ workflow_state|default:"Idle" }}</span>
+                        <span id="automation-badge" class="badge {% if automation_state.is_enabled %}badge-ok{% else %}badge-off{% endif %}" style="margin-left: 8px;">
+                            {% if automation_state.is_enabled %}Automation Running{% else %}Automation Paused{% endif %}
+                        </span>
                     </div>
+                    <div class="progress-shell">
+                        <div class="progress-bar">
+                            <div id="progress-fill" class="progress-fill" style="width: {{ workflow_progress|default:0 }}%;"></div>
+                        </div>
+                        <div class="progress-meta">
+                            <span id="progress-label">{{ latest_project.status_message|default:"Waiting for your next action." }}</span>
+                            <strong id="progress-value">{{ workflow_progress|default:0 }}%</strong>
+                        </div>
+                    </div>
+                    <div id="automation-meta" class="muted" style="margin-top: 10px;">
+                        {% if automation_state.last_cycle_at %}
+                            Last cycle: {{ automation_state.last_cycle_at|date:"M d, Y H:i" }}
+                        {% else %}
+                            Waiting for the first automation cycle.
+                        {% endif %}
+                    </div>
+                    {% if automation_state.last_error %}
+                        <div id="automation-error" class="message" style="background: var(--danger-soft); color: var(--danger); border-color: rgba(152, 59, 54, 0.16);">
+                            {{ automation_state.last_error|truncatechars:160 }}
+                        </div>
+                    {% else %}
+                        <div id="automation-error" class="muted" style="margin-top: 10px;">No automation errors.</div>
+                    {% endif %}
                     <div class="actions">
+                        <form method="post" action="{% url 'automation-start' %}">
+                            {% csrf_token %}
+                            <button class="btn btn-primary" type="submit">Start Automation</button>
+                        </form>
+                        <form method="post" action="{% url 'automation-pause' %}">
+                            {% csrf_token %}
+                            <button class="btn btn-danger" type="submit">Pause Automation</button>
+                        </form>
                         <form method="post" action="{% url 'start-new-project' %}">
                             {% csrf_token %}
                             <button class="btn btn-secondary" type="submit">Create New Video</button>
@@ -312,11 +375,11 @@
                         </form>
                         <form method="post" action="{% url 'start-upload' %}">
                             {% csrf_token %}
-                            <button class="btn btn-danger" type="submit">Start Uploading</button>
+                            <button class="btn btn-danger" type="submit">Upload Latest Ready Video</button>
                         </form>
                         <form method="post" action="{% url 'run-automation-now' %}">
                             {% csrf_token %}
-                            <button class="btn btn-secondary" type="submit">Run Full Cycle</button>
+                            <button class="btn btn-secondary" type="submit">Run Automation Now</button>
                         </form>
                         <a class="btn btn-secondary" href="/admin/">Open Admin</a>
                     </div>
@@ -339,16 +402,16 @@
                 <div class="section-head">
                     <div>
                         <h2>Preview</h2>
-                        <p>Preview exists only until upload or failure cleanup removes the file.</p>
+                        <p>Preview exists only until a successful upload or failed retry cleanup removes the file.</p>
                     </div>
                 </div>
                 <div class="preview-frame">
                     {% if latest_preview_project %}
-                        <video controls preload="metadata">
-                            <source src="{% url 'preview-video' latest_preview_project.id %}" type="video/mp4">
+                        <video id="preview-video-player" controls preload="metadata">
+                            <source id="preview-video-source" src="{% url 'preview-video' latest_preview_project.id %}" type="video/mp4">
                         </video>
                     {% else %}
-                        <div class="preview-empty">
+                        <div id="preview-empty" class="preview-empty">
                             <strong>No preview ready yet.</strong>
                             <div style="margin-top: 8px;">Create a video, run generation, then preview it here before upload.</div>
                         </div>
@@ -360,7 +423,7 @@
                 <div class="section-head">
                     <div>
                         <h2>Current Job</h2>
-                        <p>Latest project state across generation and upload.</p>
+                        <p>Latest project state across generation, validation, retry, upload, and cleanup.</p>
                     </div>
                 </div>
                 <div class="mini-stats">
@@ -373,24 +436,24 @@
                     <div class="mini-card">
                         <div class="stat-label">Status</div>
                         <div style="margin-top: 8px;">
-                            <span class="badge {% if workflow_tone == 'ok' %}badge-ok{% elif workflow_tone == 'warn' %}badge-warn{% else %}badge-off{% endif %}">{{ workflow_state|default:"Idle" }}</span>
+                            <span id="current-job-badge" class="badge {% if workflow_tone == 'ok' %}badge-ok{% elif workflow_tone == 'warn' %}badge-warn{% else %}badge-off{% endif %}">{{ workflow_state|default:"Idle" }}</span>
                         </div>
                     </div>
                     <div class="mini-card">
                         <div class="stat-label">Video File</div>
                         <div style="margin-top: 8px;">
                             {% if latest_project and latest_project.video_exists %}
-                                <span class="badge badge-warn">Stored for preview</span>
+                                <span id="video-file-badge" class="badge badge-warn">Stored for preview</span>
                             {% elif latest_project %}
-                                <span class="badge badge-ok">Deleted to save space</span>
+                                <span id="video-file-badge" class="badge badge-ok">Deleted to save space</span>
                             {% else %}
-                                <span class="badge badge-off">Not created</span>
+                                <span id="video-file-badge" class="badge badge-off">Not created</span>
                             {% endif %}
                         </div>
                     </div>
                     <div class="mini-card">
                         <div class="stat-label">Failure</div>
-                        <div style="margin-top: 8px;" class="muted">
+                        <div id="failure-text" style="margin-top: 8px;" class="muted">
                             {% if latest_project and latest_project.failure_reason %}
                                 {{ latest_project.failure_reason|truncatechars:120 }}
                             {% else %}
@@ -558,13 +621,13 @@
                 <div class="section-head">
                     <div>
                         <h2>Recent Logs</h2>
-                        <p>Latest pipeline events and cleanup outcomes.</p>
+                        <p>Latest automation, generation, upload, retry, and cleanup events.</p>
                     </div>
                 </div>
-                <div class="logs">
+                <div id="logs-list" class="logs">
                     {% for log in recent_logs %}
                         <div class="log">
-                            <strong>{{ log.event_type }}</strong>
+                            <strong>{{ log.event_type }} · {{ log.level }}</strong>
                             <div>{{ log.message }}</div>
                             <div class="muted">{{ log.created_at|date:"M d, Y H:i" }}</div>
                         </div>
@@ -575,5 +638,142 @@
             </div>
         </section>
     </div>
+    <script>
+        const badgeTone = (status) => {
+            if (["ready", "posted"].includes(status)) return "badge-ok";
+            if (["failed", "skipped"].includes(status)) return "badge-off";
+            return "badge-warn";
+        };
+
+        const labelForStatus = (status) => {
+            const map = {
+                queued: "Queued",
+                generating: "Generating",
+                ready: "Ready to upload",
+                posting: "Uploading to YouTube",
+                posted: "Uploaded and cleaned",
+                failed: "Failed and cleaned",
+                skipped: "Skipped",
+            };
+            return map[status] || "Idle";
+        };
+
+        async function refreshDashboardStatus() {
+            try {
+                const response = await fetch("{% url 'dashboard-status' %}");
+                const data = await response.json();
+                if (!data.has_project) return;
+
+                const workflowBadge = document.getElementById("workflow-badge");
+                const currentJobBadge = document.getElementById("current-job-badge");
+                const progressFill = document.getElementById("progress-fill");
+                const progressValue = document.getElementById("progress-value");
+                const progressLabel = document.getElementById("progress-label");
+                const failureText = document.getElementById("failure-text");
+                const videoFileBadge = document.getElementById("video-file-badge");
+                const automationBadge = document.getElementById("automation-badge");
+                const automationMeta = document.getElementById("automation-meta");
+                const automationError = document.getElementById("automation-error");
+                const logsList = document.getElementById("logs-list");
+
+                const toneClass = badgeTone(data.status);
+                [workflowBadge, currentJobBadge, videoFileBadge].forEach((element) => {
+                    if (!element) return;
+                    element.classList.remove("badge-ok", "badge-warn", "badge-off");
+                });
+                if (workflowBadge) {
+                    workflowBadge.classList.add(toneClass);
+                    workflowBadge.textContent = labelForStatus(data.status);
+                }
+                if (currentJobBadge) {
+                    currentJobBadge.classList.add(toneClass);
+                    currentJobBadge.textContent = labelForStatus(data.status);
+                }
+                if (progressFill) progressFill.style.width = `${data.progress_percent || 0}%`;
+                if (progressValue) progressValue.textContent = `${data.progress_percent || 0}%`;
+                if (progressLabel) progressLabel.textContent = data.status_message || "Waiting for your next action.";
+                if (failureText) failureText.textContent = data.failure_reason || "None";
+                if (automationBadge) {
+                    automationBadge.classList.remove("badge-ok", "badge-off");
+                    automationBadge.classList.add(data.automation_enabled ? "badge-ok" : "badge-off");
+                    automationBadge.textContent = data.automation_enabled ? "Automation Running" : "Automation Paused";
+                }
+                if (automationMeta) {
+                    automationMeta.textContent = data.automation_last_cycle_at
+                        ? `Last cycle: ${new Date(data.automation_last_cycle_at).toLocaleString()}`
+                        : "Waiting for the first automation cycle.";
+                }
+                if (automationError) {
+                    automationError.className = data.automation_last_error ? "message" : "muted";
+                    automationError.style.marginTop = "10px";
+                    automationError.textContent = data.automation_last_error || "No automation errors.";
+                }
+
+                if (videoFileBadge) {
+                    if (data.preview_ready) {
+                        videoFileBadge.classList.add("badge-warn");
+                        videoFileBadge.textContent = "Stored for preview";
+                    } else if (["posted", "failed"].includes(data.status)) {
+                        videoFileBadge.classList.add("badge-ok");
+                        videoFileBadge.textContent = "Deleted to save space";
+                    } else {
+                        videoFileBadge.classList.add("badge-off");
+                        videoFileBadge.textContent = "Not created";
+                    }
+                }
+
+                const frame = document.querySelector(".preview-frame");
+                let player = document.getElementById("preview-video-player");
+                let source = document.getElementById("preview-video-source");
+                let empty = document.getElementById("preview-empty");
+
+                if (data.preview_ready && player && source) {
+                    if (source.getAttribute("src") !== data.preview_url) {
+                        source.setAttribute("src", data.preview_url);
+                        player.load();
+                    }
+                } else if (data.preview_ready && !player && frame) {
+                    if (empty) empty.remove();
+                    player = document.createElement("video");
+                    player.id = "preview-video-player";
+                    player.controls = true;
+                    player.preload = "metadata";
+                    source = document.createElement("source");
+                    source.id = "preview-video-source";
+                    source.type = "video/mp4";
+                    source.src = data.preview_url;
+                    player.appendChild(source);
+                    frame.appendChild(player);
+                } else if (!data.preview_ready && player) {
+                    player.remove();
+                    if (!document.getElementById("preview-empty") && frame) {
+                        empty = document.createElement("div");
+                        empty.id = "preview-empty";
+                        empty.className = "preview-empty";
+                        empty.innerHTML = "<strong>No preview ready yet.</strong><div style='margin-top: 8px;'>Create a video, run generation, then preview it here before upload.</div>";
+                        frame.appendChild(empty);
+                    }
+                }
+
+                if (logsList && Array.isArray(data.recent_logs)) {
+                    logsList.innerHTML = "";
+                    if (!data.recent_logs.length) {
+                        logsList.innerHTML = "<div class='muted'>No events logged yet.</div>";
+                    } else {
+                        data.recent_logs.forEach((log) => {
+                            const item = document.createElement("div");
+                            item.className = "log";
+                            item.innerHTML = `<strong>${log.event_type} · ${log.level}</strong><div>${log.message}</div><div class="muted">${log.created_at}</div>`;
+                            logsList.appendChild(item);
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error("Status refresh failed", error);
+            }
+        }
+
+        setInterval(refreshDashboardStatus, 2500);
+    </script>
 </body>
 </html>

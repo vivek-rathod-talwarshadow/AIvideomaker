@@ -69,6 +69,8 @@ class VideoProject(TimeStampedModel):
     voiceover_file = models.CharField(max_length=255, blank=True)
     music_file = models.CharField(max_length=255, blank=True)
     failure_reason = models.TextField(blank=True)
+    progress_percent = models.PositiveIntegerField(default=0)
+    status_message = models.CharField(max_length=255, blank=True)
 
     def __str__(self) -> str:
         return f"{self.topic.title} [{self.status}]"
@@ -113,6 +115,20 @@ class SchedulerLock(TimeStampedModel):
 
     def __str__(self) -> str:
         return self.key
+
+
+class AutomationState(TimeStampedModel):
+    key = models.CharField(max_length=80, unique=True, default="global")
+    is_enabled = models.BooleanField(default=True)
+    auto_upload = models.BooleanField(default=True)
+    retry_failures = models.BooleanField(default=True)
+    last_started_at = models.DateTimeField(null=True, blank=True)
+    last_paused_at = models.DateTimeField(null=True, blank=True)
+    last_cycle_at = models.DateTimeField(null=True, blank=True)
+    last_error = models.TextField(blank=True)
+
+    def __str__(self) -> str:
+        return f"{self.key} ({'enabled' if self.is_enabled else 'paused'})"
 
 
 class EventLog(TimeStampedModel):

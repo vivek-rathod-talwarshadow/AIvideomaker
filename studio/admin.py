@@ -1,7 +1,7 @@
 from django.contrib import admin, messages
 from django.utils import timezone
 
-from .models import ChannelProfile, ContentTemplate, EventLog, MediaAsset, PublishJob, SchedulerLock, VideoProject, ViralTopic
+from .models import AutomationState, ChannelProfile, ContentTemplate, EventLog, MediaAsset, PublishJob, SchedulerLock, VideoProject, ViralTopic
 
 
 @admin.register(ChannelProfile)
@@ -65,3 +65,8 @@ class EventLogAdmin(admin.ModelAdmin):
 @admin.register(SchedulerLock)
 class SchedulerLockAdmin(admin.ModelAdmin):
     list_display = ("key", "locked_until", "owner", "updated_at")
+
+
+@admin.register(AutomationState)
+class AutomationStateAdmin(admin.ModelAdmin):
+    list_display = ("key", "is_enabled", "auto_upload", "retry_failures", "last_cycle_at", "updated_at")

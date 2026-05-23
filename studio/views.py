@@ -11,6 +11,7 @@ from django.views.decorators.http import require_GET, require_POST
 
 from .enums import JobStatus, PlatformType
 from .models import EventLog, PublishJob, VideoProject
+from .services.pipeline import get_automation_state
 
 
 def _platform_status_cards() -> list[dict]:
@@ -91,6 +92,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "recent_projects": [],
         "recent_jobs": [],
         "recent_logs": [],
+        "automation_state": None,
         "stats": {
             "total_projects": 0,
             "queued_projects": 0,
@@ -102,6 +104,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "setup_needed": False,
     }
     try:
+        automation_state = get_automation_state()
         project_counts = {
             item["status"]: item["total"]
             for item in VideoProject.objects.values("status").annotate(total=Count("id"))
@@ -126,6 +129,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         latest_preview_project = next((project for project in recent_projects if project.is_previewable), None)
         workflow_state = "Idle"
         workflow_tone = "ok"
+        workflow_progress = 0
         if latest_project:
             state_map = {
                 JobStatus.QUEUED: ("Queued", "warn"),
@@ -137,6 +141,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 JobStatus.SKIPPED: ("Skipped", "off"),
             }
             workflow_state, workflow_tone = state_map.get(latest_project.status, ("Idle", "ok"))
+            workflow_progress = latest_project.progress_percent
 
         context.update(
             {
@@ -147,6 +152,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 "latest_preview_project": latest_preview_project,
                 "workflow_state": workflow_state,
                 "workflow_tone": workflow_tone,
+                "workflow_progress": workflow_progress,
                 "stats": {
                     "total_projects": VideoProject.objects.count(),
                     "queued_projects": project_counts.get(JobStatus.QUEUED, 0),
@@ -155,6 +161,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                     "failed_projects": project_counts.get(JobStatus.FAILED, 0),
                     "disk_clean_projects": sum(1 for project in recent_projects if not project.video_exists),
                 },
+                "automation_state": automation_state,
             }
         )
     except (OperationalError, ProgrammingError):
@@ -166,6 +173,61 @@ def dashboard(request: HttpRequest) -> HttpResponse:
 @require_GET
 def healthcheck(request: HttpRequest) -> HttpResponse:
     return JsonResponse({"status": "ok", "service": "viralforge"})
+
+
+@require_GET
+def dashboard_status(request: HttpRequest) -> HttpResponse:
+    try:
+        project = VideoProject.objects.select_related("topic").order_by("-created_at").first()
+        automation_state = get_automation_state()
+        logs = list(EventLog.objects.select_related("project", "publish_job").order_by("-created_at")[:12])
+    except (OperationalError, ProgrammingError):
+        return JsonResponse({"has_project": False, "setup_needed": True})
+    if not project:
+        return JsonResponse(
+            {
+                "has_project": False,
+                "automation_enabled": automation_state.is_enabled,
+                "automation_last_cycle_at": automation_state.last_cycle_at.isoformat() if automation_state.last_cycle_at else "",
+                "automation_last_error": automation_state.last_error,
+                "recent_logs": [
+                    {
+                        "level": log.level,
+                        "event_type": log.event_type,
+                        "message": log.message,
+                        "created_at": log.created_at.strftime("%b %d, %Y %H:%M"),
+                    }
+                    for log in logs
+                ],
+            }
+        )
+
+    preview_ready = bool(project.output_file and Path(project.output_file).exists())
+    return JsonResponse(
+        {
+            "has_project": True,
+            "project_id": project.id,
+            "title": project.topic.title,
+            "status": project.status,
+            "status_message": project.status_message,
+            "progress_percent": project.progress_percent,
+            "failure_reason": project.failure_reason,
+            "preview_ready": preview_ready,
+            "preview_url": f"/dashboard/preview/{project.id}/" if preview_ready else "",
+            "automation_enabled": automation_state.is_enabled,
+            "automation_last_cycle_at": automation_state.last_cycle_at.isoformat() if automation_state.last_cycle_at else "",
+            "automation_last_error": automation_state.last_error,
+            "recent_logs": [
+                {
+                    "level": log.level,
+                    "event_type": log.event_type,
+                    "message": log.message,
+                    "created_at": log.created_at.strftime("%b %d, %Y %H:%M"),
+                }
+                for log in logs
+            ],
+        }
+    )
 
 
 @require_POST
@@ -185,8 +247,33 @@ def run_automation_once(request: HttpRequest) -> HttpResponse:
 def run_automation_now(request: HttpRequest) -> HttpResponse:
     from .services.pipeline import process_due_work
 
-    result = process_due_work()
-    messages.success(request, f"Automation run finished: {result}")
+    try:
+        result = process_due_work()
+        messages.success(request, f"Automation run finished: {result}")
+    except Exception as exc:
+        messages.error(request, f"Automation run failed: {exc}")
+    return redirect("dashboard")
+
+
+@require_POST
+def automation_start(request: HttpRequest) -> HttpResponse:
+    from .services.pipeline import start_automation, process_due_work
+
+    start_automation()
+    try:
+        result = process_due_work()
+        messages.success(request, f"Automation started. Latest cycle: {result}")
+    except Exception as exc:
+        messages.error(request, f"Automation started, but the first cycle failed: {exc}")
+    return redirect("dashboard")
+
+
+@require_POST
+def automation_pause(request: HttpRequest) -> HttpResponse:
+    from .services.pipeline import pause_automation
+
+    state = pause_automation()
+    messages.success(request, "Automation paused. New uploads and generation cycles are on hold.")
     return redirect("dashboard")
 
 
@@ -201,38 +288,28 @@ def start_new_project(request: HttpRequest) -> HttpResponse:
 
 @require_POST
 def start_generate(request: HttpRequest) -> HttpResponse:
-    from .services.pipeline import generate_latest_project
+    from .services.pipeline import start_generation_async
 
-    try:
-        project = generate_latest_project()
-        if not project:
-            messages.warning(request, "No project found. Create one first.")
-        else:
-            messages.success(request, f"Generation step finished for project #{project.id}.")
-    except Exception as exc:
-        messages.error(request, f"Generation failed: {exc}")
+    project = VideoProject.objects.order_by("-created_at").first()
+    if not project:
+        messages.warning(request, "No project found. Create one first.")
+    else:
+        start_generation_async(project)
+        messages.success(request, f"Generation started for project #{project.id}.")
     return redirect("dashboard")
 
 
 @require_POST
 def start_upload(request: HttpRequest) -> HttpResponse:
-    from .services.pipeline import publish_project
+    from .services.pipeline import start_upload_async
 
     project = VideoProject.objects.order_by("-created_at").first()
     if not project:
         messages.warning(request, "No project found. Create one first.")
         return redirect("dashboard")
 
-    try:
-        job = publish_project(project)
-        if not job:
-            messages.warning(request, "No upload job available. Generate a video first or check the queue.")
-        elif job.status == JobStatus.POSTED:
-            messages.success(request, f"Uploaded project #{project.id} to YouTube successfully.")
-        else:
-            messages.error(request, f"Upload ended with status {job.status}. Check logs for details.")
-    except Exception as exc:
-        messages.error(request, f"Upload failed: {exc}")
+    start_upload_async(project)
+    messages.success(request, f"Upload started for project #{project.id}.")
     return redirect("dashboard")
 
 

@@ -5,6 +5,7 @@ import hashlib
 import os
 import re
 import shutil
+import time
 from typing import Iterable
 
 from django.conf import settings
@@ -34,12 +35,28 @@ def stable_hash(parts: Iterable[str]) -> str:
     return digest[:16]
 
 
-def safe_unlink(path: str | Path) -> None:
-    try:
-        os.remove(path)
-    except FileNotFoundError:
-        pass
+def safe_unlink(path: str | Path, retries: int = 6, delay_seconds: float = 0.5) -> bool:
+    path_obj = Path(path)
+    for attempt in range(retries):
+        try:
+            os.remove(path_obj)
+            return True
+        except FileNotFoundError:
+            return True
+        except PermissionError:
+            if attempt == retries - 1:
+                return False
+            time.sleep(delay_seconds)
+    return False
 
 
-def safe_rmtree(path: str | Path) -> None:
-    shutil.rmtree(path, ignore_errors=True)
+def safe_rmtree(path: str | Path, retries: int = 6, delay_seconds: float = 0.5) -> bool:
+    path_obj = Path(path)
+    for attempt in range(retries):
+        shutil.rmtree(path_obj, ignore_errors=True)
+        if not path_obj.exists():
+            return True
+        if attempt == retries - 1:
+            return False
+        time.sleep(delay_seconds)
+    return not path_obj.exists()

@@ -113,6 +113,10 @@ PINTEREST_BOARD_ID = env_or_default("PINTEREST_BOARD_ID", "")
 ENABLE_YOUTUBE_UPLOAD = os.getenv("ENABLE_YOUTUBE_UPLOAD", "True").lower() == "true"
 ENABLE_INSTAGRAM_UPLOAD = os.getenv("ENABLE_INSTAGRAM_UPLOAD", "False").lower() == "true"
 ENABLE_PINTEREST_UPLOAD = os.getenv("ENABLE_PINTEREST_UPLOAD", "False").lower() == "true"
+CHANNEL_BRAND_NAME = os.getenv("CHANNEL_BRAND_NAME", "DarkBrainScroll")
+EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-US-AnaNeural")
+AUTOMATION_RETRY_LIMIT = int(os.getenv("AUTOMATION_RETRY_LIMIT", "3"))
+AUTOMATION_RETRY_DELAY_SECONDS = int(os.getenv("AUTOMATION_RETRY_DELAY_SECONDS", "60"))
 
 LOGGING = {
     "version": 1,

@@ -37,19 +37,27 @@ def build_youtube_service():
 
 
 def build_youtube_metadata(project) -> dict:
-    title = truncate_text(f"{project.topic.title} #Shorts", 95)
+    default_tags = ["shorts", "viral", "trending", "facts", "darkbrainscroll", "youtubeShorts"]
+    tags = []
+    for tag in [*project.topic.hashtags[:10], *[f"#{tag}" for tag in default_tags]]:
+        normalized = tag.lstrip("#").strip()
+        if normalized and normalized.lower() not in {item.lower() for item in tags}:
+            tags.append(normalized)
+
+    title = truncate_text(f"{project.topic.title} | {settings.CHANNEL_BRAND_NAME} #Shorts", 95)
     description_lines = [
+        f"{settings.CHANNEL_BRAND_NAME} brings you fast viral facts and story-driven shorts.",
+        "",
         project.topic.description or project.topic.script,
         "",
-        " ".join(project.topic.hashtags[:10]) if project.topic.hashtags else "#shorts",
+        " ".join(f"#{tag}" for tag in tags[:12]) if tags else "#shorts #viral",
     ]
-    tags = [tag.lstrip("#") for tag in project.topic.hashtags[:10]]
 
     return {
         "snippet": {
             "title": title,
             "description": truncate_text("\n".join(description_lines), 4900),
-            "tags": tags,
+            "tags": tags[:15],
             "categoryId": "22",
         },
         "status": {
