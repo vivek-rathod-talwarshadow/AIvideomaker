@@ -560,7 +560,7 @@
                             <th>Video</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="recent-videos-body">
                         {% for project in recent_projects %}
                             <tr>
                                 <td>
@@ -627,7 +627,7 @@
                 <div id="logs-list" class="logs">
                     {% for log in recent_logs %}
                         <div class="log">
-                            <strong>{{ log.event_type }} · {{ log.level }}</strong>
+                            <strong>{{ log.event_type }} &middot; {{ log.level }}</strong>
                             <div>{{ log.message }}</div>
                             <div class="muted">{{ log.created_at|date:"M d, Y H:i" }}</div>
                         </div>
@@ -675,6 +675,7 @@
                 const automationMeta = document.getElementById("automation-meta");
                 const automationError = document.getElementById("automation-error");
                 const logsList = document.getElementById("logs-list");
+                const recentVideosTableBody = document.getElementById("recent-videos-body");
 
                 const toneClass = badgeTone(data.status);
                 [workflowBadge, currentJobBadge, videoFileBadge].forEach((element) => {
@@ -763,8 +764,32 @@
                         data.recent_logs.forEach((log) => {
                             const item = document.createElement("div");
                             item.className = "log";
-                            item.innerHTML = `<strong>${log.event_type} · ${log.level}</strong><div>${log.message}</div><div class="muted">${log.created_at}</div>`;
+                            item.innerHTML = `<strong>${log.event_type} &middot; ${log.level}</strong><div>${log.message}</div><div class="muted">${log.created_at}</div>`;
                             logsList.appendChild(item);
+                        });
+                    }
+                }
+
+                if (recentVideosTableBody && Array.isArray(data.recent_projects)) {
+                    recentVideosTableBody.innerHTML = "";
+                    if (!data.recent_projects.length) {
+                        recentVideosTableBody.innerHTML = "<tr><td colspan='3' class='muted'>No projects yet.</td></tr>";
+                    } else {
+                        data.recent_projects.forEach((project) => {
+                            const row = document.createElement("tr");
+                            row.innerHTML = `
+                                <td>
+                                    <strong>${project.title}</strong><br>
+                                    <span class="muted">${project.created_at}</span>
+                                </td>
+                                <td><span class="pill">${project.status}</span></td>
+                                <td>
+                                    <span class="badge ${project.video_exists ? "badge-warn" : "badge-ok"}">
+                                        ${project.video_exists ? "Stored" : "Cleaned"}
+                                    </span>
+                                </td>
+                            `;
+                            recentVideosTableBody.appendChild(row);
                         });
                     }
                 }

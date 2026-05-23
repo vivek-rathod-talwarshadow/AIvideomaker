@@ -181,6 +181,7 @@ def dashboard_status(request: HttpRequest) -> HttpResponse:
         project = VideoProject.objects.select_related("topic").order_by("-created_at").first()
         automation_state = get_automation_state()
         logs = list(EventLog.objects.select_related("project", "publish_job").order_by("-created_at")[:12])
+        recent_projects = list(VideoProject.objects.select_related("topic").order_by("-created_at")[:8])
     except (OperationalError, ProgrammingError):
         return JsonResponse({"has_project": False, "setup_needed": True})
     if not project:
@@ -199,6 +200,7 @@ def dashboard_status(request: HttpRequest) -> HttpResponse:
                     }
                     for log in logs
                 ],
+                "recent_projects": [],
             }
         )
 
@@ -217,6 +219,15 @@ def dashboard_status(request: HttpRequest) -> HttpResponse:
             "automation_enabled": automation_state.is_enabled,
             "automation_last_cycle_at": automation_state.last_cycle_at.isoformat() if automation_state.last_cycle_at else "",
             "automation_last_error": automation_state.last_error,
+            "recent_projects": [
+                {
+                    "title": item.topic.title,
+                    "status": item.status,
+                    "created_at": item.created_at.strftime("%b %d, %Y %H:%M"),
+                    "video_exists": bool(item.output_file and Path(item.output_file).exists()),
+                }
+                for item in recent_projects
+            ],
             "recent_logs": [
                 {
                     "level": log.level,
