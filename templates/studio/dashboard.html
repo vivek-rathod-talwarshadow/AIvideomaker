@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ViralForge Dashboard</title>
+    <style>
+        :root {
+            --panel: rgba(255, 250, 242, 0.86);
+            --panel-strong: #fffaf2;
+            --ink: #1f1a14;
+            --muted: #6d6258;
+            --line: rgba(73, 58, 39, 0.14);
+            --accent: #d5612a;
+            --accent-soft: #ffefe2;
+            --success: #206246;
+            --success-soft: #e3f4eb;
+            --warn: #8a5a11;
+            --warn-soft: #fff1d7;
+            --danger: #983b36;
+            --danger-soft: #fde6e5;
+            --dark: #2f241c;
+            --shadow: 0 20px 60px rgba(74, 49, 24, 0.10);
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            font-family: Georgia, "Times New Roman", serif;
+            color: var(--ink);
+            background:
+                radial-gradient(circle at top left, rgba(213, 97, 42, 0.16), transparent 30%),
+                radial-gradient(circle at top right, rgba(63, 118, 89, 0.12), transparent 28%),
+                linear-gradient(180deg, #f8f1e6 0%, #efe6d8 100%);
+            min-height: 100vh;
+        }
+
+        .shell {
+            width: min(1180px, calc(100% - 32px));
+            margin: 28px auto 40px;
+        }
+
+        .hero,
+        .stat,
+        .status-card,
+        .table-card,
+        .action-card {
+            border: 1px solid var(--line);
+            background: var(--panel);
+            border-radius: 24px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(12px);
+        }
+
+        .hero {
+            padding: 28px;
+            background: linear-gradient(135deg, rgba(255,255,255,0.88), rgba(255,244,230,0.92));
+            display: grid;
+            grid-template-columns: 1.8fr 1fr;
+            gap: 22px;
+        }
+
+        .hero h1 {
+            margin: 0 0 10px;
+            font-size: clamp(2rem, 4vw, 4rem);
+            line-height: 0.95;
+            letter-spacing: -0.04em;
+        }
+
+        .hero p, .muted {
+            color: var(--muted);
+        }
+
+        .action-card,
+        .table-card,
+        .stat,
+        .status-card {
+            padding: 18px;
+        }
+
+        .hero-actions {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        .actions {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            margin-top: 14px;
+        }
+
+        .btn {
+            appearance: none;
+            border: none;
+            border-radius: 999px;
+            padding: 12px 18px;
+            font-size: 0.95rem;
+            font-weight: 700;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .btn-primary { background: var(--accent); color: white; }
+        .btn-secondary { background: var(--accent-soft); color: var(--accent); }
+        .btn-danger { background: var(--dark); color: #fff8ef; }
+
+        .message {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border-radius: 16px;
+            background: var(--success-soft);
+            color: var(--success);
+            border: 1px solid rgba(32, 98, 70, 0.16);
+        }
+
+        .grid-stats,
+        .grid-status,
+        .table-grid,
+        .preview-grid {
+            display: grid;
+            gap: 16px;
+        }
+
+        .grid-stats {
+            grid-template-columns: repeat(6, minmax(0, 1fr));
+            margin-top: 20px;
+        }
+
+        .grid-status {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            margin-top: 26px;
+        }
+
+        .table-grid,
+        .preview-grid {
+            grid-template-columns: 1.2fr 1fr;
+        }
+
+        .preview-grid {
+            margin-top: 26px;
+        }
+
+        .stat-label {
+            font-size: 0.82rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+
+        .stat-value {
+            margin-top: 8px;
+            font-size: 2rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+
+        .section {
+            margin-top: 26px;
+        }
+
+        .section-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: end;
+            gap: 16px;
+            margin-bottom: 14px;
+        }
+
+        .section-head h2 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+
+        .section-head p,
+        .status-card p {
+            margin: 0;
+            color: var(--muted);
+        }
+
+        .status-top {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            gap: 12px;
+        }
+
+        .badge,
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 999px;
+            padding: 7px 12px;
+            font-size: 0.82rem;
+            font-weight: 700;
+        }
+
+        .badge-ok { background: var(--success-soft); color: var(--success); }
+        .badge-warn { background: var(--warn-soft); color: var(--warn); }
+        .badge-off { background: var(--danger-soft); color: var(--danger); }
+
+        .pill {
+            background: #f2eadf;
+            color: #5d4f42;
+            text-transform: capitalize;
+        }
+
+        .preview-frame {
+            width: 100%;
+            aspect-ratio: 9 / 16;
+            border: 1px solid var(--line);
+            border-radius: 24px;
+            background: linear-gradient(180deg, #2b241d, #17120e);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .preview-frame video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .preview-empty {
+            padding: 24px;
+            text-align: center;
+            color: #f8efe2;
+        }
+
+        .mini-stats,
+        .logs {
+            display: grid;
+            gap: 12px;
+        }
+
+        .mini-card,
+        .log {
+            padding: 14px 16px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: var(--panel-strong);
+        }
+
+        .log strong {
+            display: block;
+            margin-bottom: 6px;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 12px 0;
+            border-bottom: 1px solid var(--line);
+            vertical-align: top;
+        }
+
+        th {
+            font-size: 0.78rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
+        }
+
+        td {
+            font-size: 0.95rem;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        @media (max-width: 980px) {
+            .hero,
+            .grid-status,
+            .grid-stats,
+            .preview-grid,
+            .table-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="shell">
+        <section class="hero">
+            <div>
+                <h1>ViralForge Control Room</h1>
+                <p>Monitor generation, preview, upload status, and cleanup from one place. The current workflow is tuned for YouTube Shorts only.</p>
+            </div>
+            <div class="hero-actions">
+                <div class="action-card">
+                    <div class="muted">Workflow state</div>
+                    <h3 style="margin: 8px 0 0;">Create, preview, then upload to YouTube</h3>
+                    <div style="margin-top: 12px;">
+                        <span class="badge {% if workflow_tone == 'ok' %}badge-ok{% elif workflow_tone == 'warn' %}badge-warn{% else %}badge-off{% endif %}">{{ workflow_state|default:"Idle" }}</span>
+                    </div>
+                    <div class="actions">
+                        <form method="post" action="{% url 'start-new-project' %}">
+                            {% csrf_token %}
+                            <button class="btn btn-secondary" type="submit">Create New Video</button>
+                        </form>
+                        <form method="post" action="{% url 'start-generate' %}">
+                            {% csrf_token %}
+                            <button class="btn btn-primary" type="submit">Generate Preview</button>
+                        </form>
+                        <form method="post" action="{% url 'start-upload' %}">
+                            {% csrf_token %}
+                            <button class="btn btn-danger" type="submit">Start Uploading</button>
+                        </form>
+                        <form method="post" action="{% url 'run-automation-now' %}">
+                            {% csrf_token %}
+                            <button class="btn btn-secondary" type="submit">Run Full Cycle</button>
+                        </form>
+                        <a class="btn btn-secondary" href="/admin/">Open Admin</a>
+                    </div>
+                    {% if messages %}
+                        {% for message in messages %}
+                            <div class="message">{{ message }}</div>
+                        {% endfor %}
+                    {% endif %}
+                    {% if setup_needed %}
+                        <div class="message" style="background: var(--warn-soft); color: var(--warn); border-color: rgba(138, 90, 17, 0.16);">
+                            Database tables are not ready yet. Run <code>python manage.py migrate</code> to unlock project and queue data.
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+        </section>
+
+        <section class="preview-grid">
+            <div class="table-card">
+                <div class="section-head">
+                    <div>
+                        <h2>Preview</h2>
+                        <p>Preview exists only until upload or failure cleanup removes the file.</p>
+                    </div>
+                </div>
+                <div class="preview-frame">
+                    {% if latest_preview_project %}
+                        <video controls preload="metadata">
+                            <source src="{% url 'preview-video' latest_preview_project.id %}" type="video/mp4">
+                        </video>
+                    {% else %}
+                        <div class="preview-empty">
+                            <strong>No preview ready yet.</strong>
+                            <div style="margin-top: 8px;">Create a video, run generation, then preview it here before upload.</div>
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="table-card">
+                <div class="section-head">
+                    <div>
+                        <h2>Current Job</h2>
+                        <p>Latest project state across generation and upload.</p>
+                    </div>
+                </div>
+                <div class="mini-stats">
+                    <div class="mini-card">
+                        <div class="stat-label">Latest Title</div>
+                        <div style="margin-top: 8px; font-weight: 700;">
+                            {% if latest_project %}{{ latest_project.topic.title }}{% else %}No project yet{% endif %}
+                        </div>
+                    </div>
+                    <div class="mini-card">
+                        <div class="stat-label">Status</div>
+                        <div style="margin-top: 8px;">
+                            <span class="badge {% if workflow_tone == 'ok' %}badge-ok{% elif workflow_tone == 'warn' %}badge-warn{% else %}badge-off{% endif %}">{{ workflow_state|default:"Idle" }}</span>
+                        </div>
+                    </div>
+                    <div class="mini-card">
+                        <div class="stat-label">Video File</div>
+                        <div style="margin-top: 8px;">
+                            {% if latest_project and latest_project.video_exists %}
+                                <span class="badge badge-warn">Stored for preview</span>
+                            {% elif latest_project %}
+                                <span class="badge badge-ok">Deleted to save space</span>
+                            {% else %}
+                                <span class="badge badge-off">Not created</span>
+                            {% endif %}
+                        </div>
+                    </div>
+                    <div class="mini-card">
+                        <div class="stat-label">Failure</div>
+                        <div style="margin-top: 8px;" class="muted">
+                            {% if latest_project and latest_project.failure_reason %}
+                                {{ latest_project.failure_reason|truncatechars:120 }}
+                            {% else %}
+                                None
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="grid-stats">
+            <div class="stat">
+                <div class="stat-label">Total Projects</div>
+                <div class="stat-value">{{ stats.total_projects }}</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Queued</div>
+                <div class="stat-value">{{ stats.queued_projects }}</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Ready</div>
+                <div class="stat-value">{{ stats.ready_projects }}</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Posted</div>
+                <div class="stat-value">{{ stats.posted_projects }}</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Failed</div>
+                <div class="stat-value">{{ stats.failed_projects }}</div>
+            </div>
+            <div class="stat">
+                <div class="stat-label">Recent Cleaned</div>
+                <div class="stat-value">{{ stats.disk_clean_projects }}</div>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <div>
+                    <h2>Platform Status</h2>
+                    <p>Live connection and enablement state for each publishing target.</p>
+                </div>
+            </div>
+            <div class="grid-status">
+                {% for card in platform_cards %}
+                    <article class="status-card">
+                        <div class="status-top">
+                            <span class="pill">{{ card.platform }}</span>
+                            {% if not card.enabled %}
+                                <span class="badge badge-off">Disabled</span>
+                            {% elif card.connected %}
+                                <span class="badge badge-ok">Connected</span>
+                            {% else %}
+                                <span class="badge badge-warn">Needs API</span>
+                            {% endif %}
+                        </div>
+                        <h3>{{ card.name }}</h3>
+                        <p>{{ card.note }}</p>
+                    </article>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="section-head">
+                <div>
+                    <h2>Provider Status</h2>
+                    <p>Content, media, and rendering providers used by the pipeline.</p>
+                </div>
+            </div>
+            <div class="grid-status">
+                {% for card in provider_cards %}
+                    <article class="status-card">
+                        <div class="status-top">
+                            <span class="pill">provider</span>
+                            {% if card.connected %}
+                                <span class="badge badge-ok">Configured</span>
+                            {% else %}
+                                <span class="badge badge-warn">Missing Key</span>
+                            {% endif %}
+                        </div>
+                        <h3>{{ card.name }}</h3>
+                        <p>{{ card.note }}</p>
+                    </article>
+                {% endfor %}
+            </div>
+        </section>
+
+        <section class="section table-grid">
+            <div class="table-card">
+                <div class="section-head">
+                    <div>
+                        <h2>Recent Videos</h2>
+                        <p>Generated projects and whether local video files still exist.</p>
+                    </div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Title</th>
+                            <th>Status</th>
+                            <th>Video</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for project in recent_projects %}
+                            <tr>
+                                <td>
+                                    <strong>{{ project.topic.title }}</strong><br>
+                                    <span class="muted">{{ project.created_at|date:"M d, Y H:i" }}</span>
+                                </td>
+                                <td><span class="pill">{{ project.status }}</span></td>
+                                <td>
+                                    {% if project.video_exists %}
+                                        <span class="badge badge-warn">Stored</span>
+                                    {% else %}
+                                        <span class="badge badge-ok">Cleaned</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="3" class="muted">No projects yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="table-card">
+                <div class="section-head">
+                    <div>
+                        <h2>Upload Queue</h2>
+                        <p>Latest publish attempts across enabled channels.</p>
+                    </div>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Platform</th>
+                            <th>Status</th>
+                            <th>Last Error</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for job in recent_jobs %}
+                            <tr>
+                                <td>
+                                    <strong>{{ job.channel.name }}</strong><br>
+                                    <span class="muted">{{ job.project.topic.title|truncatechars:40 }}</span>
+                                </td>
+                                <td><span class="pill">{{ job.status }}</span></td>
+                                <td class="muted">{{ job.last_error|default:"-"|truncatechars:50 }}</td>
+                            </tr>
+                        {% empty %}
+                            <tr><td colspan="3" class="muted">No publish jobs yet.</td></tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <section class="section">
+            <div class="table-card">
+                <div class="section-head">
+                    <div>
+                        <h2>Recent Logs</h2>
+                        <p>Latest pipeline events and cleanup outcomes.</p>
+                    </div>
+                </div>
+                <div class="logs">
+                    {% for log in recent_logs %}
+                        <div class="log">
+                            <strong>{{ log.event_type }}</strong>
+                            <div>{{ log.message }}</div>
+                            <div class="muted">{{ log.created_at|date:"M d, Y H:i" }}</div>
+                        </div>
+                    {% empty %}
+                        <div class="muted">No events logged yet.</div>
+                    {% endfor %}
+                </div>
+            </div>
+        </section>
+    </div>
+</body>
+</html>
