@@ -205,7 +205,12 @@ def create_daily_project_if_needed() -> VideoProject | None:
             order_index=order_index,
         )
     log_event("automation.project_queued", "Project queued for automatic generation and upload.", project=project)
-    log_event("project.created", "Daily project generated.", project=project)
+    log_event(
+        "project.created",
+        "Daily project generated.",
+        project=project,
+        payload={"title": project.topic.title, "niche": project.niche, "automation": True},
+    )
     return project
 
 
@@ -240,7 +245,12 @@ def create_project(niche: str = "facts") -> VideoProject:
         project.status = JobStatus.SKIPPED
         project.failure_reason = "No platforms are enabled."
         project.save(update_fields=["status", "failure_reason", "updated_at"])
-    log_event("project.created", "Manual project generated from dashboard.", project=project)
+    log_event(
+        "project.created",
+        "Manual project generated from dashboard.",
+        project=project,
+        payload={"title": project.topic.title, "niche": project.niche, "automation": False},
+    )
     return project
 
 

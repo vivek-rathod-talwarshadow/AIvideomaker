@@ -185,7 +185,37 @@ def _render_scene_clip(
         *VIDEO_ONLY_ARGS,
         str(clip_path),
     ]
-    subprocess.run(command, check=True, capture_output=True, text=True)
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError:
+        fallback_command = [
+            ffmpeg_path,
+            "-y",
+            "-loop",
+            "1",
+            "-i",
+            asset.local_path,
+            "-t",
+            str(duration),
+            "-an",
+            "-vf",
+            ",".join(
+                [
+                    f"scale={project.target_width}:{project.target_height}:force_original_aspect_ratio=increase",
+                    f"crop={project.target_width}:{project.target_height}",
+                    "format=yuv420p",
+                ]
+            ),
+            "-r",
+            "30",
+            *VIDEO_ONLY_ARGS,
+            str(clip_path),
+        ]
+        try:
+            subprocess.run(fallback_command, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as exc:
+            stderr = (exc.stderr or "").strip()
+            raise RuntimeError(f"ffmpeg scene render failed for {asset.local_path}: {stderr or exc}") from exc
 
 
 def render_slideshow_video(project: VideoProject) -> str:
@@ -266,7 +296,11 @@ def render_slideshow_video(project: VideoProject) -> str:
             str(output_path),
         ]
     )
-    subprocess.run(final_command, check=True, capture_output=True, text=True)
+    try:
+        subprocess.run(final_command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        raise RuntimeError(f"ffmpeg final render failed: {stderr or exc}") from exc
 
     project.output_file = str(output_path)
     project.status = "ready"

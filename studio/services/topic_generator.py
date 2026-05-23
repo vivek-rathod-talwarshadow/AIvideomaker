@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from math import ceil
 import random
+import re
 
 from studio.enums import ContentNiche
-from studio.models import ViralTopic
+from studio.models import EventLog, ViralTopic
 
 
 TOPIC_LIBRARY = {
@@ -50,6 +51,62 @@ TOPIC_LIBRARY = {
             "cta": "Follow DarkBrainScroll for more facts people argue about in the comments.",
             "hashtags": ["#facts", "#mindblown", "#science", "#shorts", "#viral"],
             "source_notes": ["curated-truth-pack"],
+        },
+        {
+            "title": "Space Facts That Feel Illegal To Know",
+            "hook": "Space gets weird fast once you leave Earth.",
+            "beats": [
+                "A spoonful of neutron star material would weigh around a billion tons on Earth.",
+                "One day on Mercury lasts longer than one year on Mercury if you measure sunrise to sunrise.",
+                "There are regions of space where giant alcohol clouds float between stars.",
+                "If two metal pieces touch in space, they can bond together permanently because there is no oxygen layer between them.",
+                "The footprints left on the Moon could stay there for millions of years because there is almost no weather to erase them.",
+            ],
+            "cta": "Follow DarkBrainScroll for space facts that sound completely made up.",
+            "hashtags": ["#space", "#facts", "#science", "#shorts", "#viral"],
+            "source_notes": ["curated-space-pack"],
+        },
+        {
+            "title": "Animal Facts That Make Nature Feel Unreal",
+            "hook": "Nature has creatures that sound like fiction.",
+            "beats": [
+                "Tardigrades can survive extreme cold, intense radiation, and even the vacuum of space for a limited time.",
+                "Some frogs can freeze solid in winter and start moving again when they thaw.",
+                "A shrimp called the pistol shrimp snaps its claw so fast it creates a bubble hotter than the surface of the Sun for an instant.",
+                "Sea otters hold hands while sleeping so they do not drift away from each other.",
+                "Crows can remember human faces and warn other crows about people they dislike.",
+            ],
+            "cta": "Follow DarkBrainScroll if you want more animal facts that sound fake.",
+            "hashtags": ["#animals", "#facts", "#nature", "#shorts", "#viral"],
+            "source_notes": ["curated-animal-pack"],
+        },
+        {
+            "title": "Human Body Facts That Sound Glitched",
+            "hook": "Your body does things most people never notice.",
+            "beats": [
+                "Your stomach lining replaces itself regularly because its own acid is strong enough to damage it.",
+                "The bones in your body are constantly being broken down and rebuilt over time.",
+                "You are slightly taller in the morning because the discs in your spine decompress while you sleep.",
+                "Your nose can detect more than a trillion different scents according to modern estimates.",
+                "Your skin is your largest organ, and it quietly renews itself over and over across your life.",
+            ],
+            "cta": "Follow DarkBrainScroll for more body facts that feel impossible.",
+            "hashtags": ["#humanbody", "#facts", "#science", "#shorts", "#viral"],
+            "source_notes": ["curated-body-pack"],
+        },
+        {
+            "title": "Ocean Facts That Are Genuinely Disturbing",
+            "hook": "The ocean is beautiful, but it is also deeply unsettling.",
+            "beats": [
+                "More of the ocean floor has been mapped in detail recently, but huge portions still remain poorly explored.",
+                "Some deep-sea fish live under pressures that would crush most surface creatures instantly.",
+                "There are underwater lakes and rivers on the ocean floor formed by super-salty water.",
+                "The giant squid stayed in the realm of legend for centuries before scientists captured clear footage of one alive.",
+                "Bioluminescent animals can create their own light in darkness that sunlight never reaches.",
+            ],
+            "cta": "Follow DarkBrainScroll for ocean facts that stay in your head all day.",
+            "hashtags": ["#ocean", "#facts", "#science", "#shorts", "#viral"],
+            "source_notes": ["curated-ocean-pack"],
         },
     ],
     ContentNiche.TECH: [
@@ -107,6 +164,31 @@ def _topic_candidates(niche: str) -> list[dict]:
     return TOPIC_LIBRARY.get(niche, TOPIC_LIBRARY[ContentNiche.FACTS])
 
 
+def _extract_logged_title(log: EventLog) -> str:
+    payload_title = (log.payload or {}).get("title", "").strip()
+    if payload_title:
+        return payload_title
+    match = re.search(r"Project '(.+?)' was removed", log.message or "")
+    if match:
+        return match.group(1).strip()
+    return ""
+
+
+def _recently_used_titles(niche: str, limit: int = 12) -> list[str]:
+    current_titles = list(ViralTopic.objects.filter(niche=niche).values_list("title", flat=True))
+    log_titles: list[str] = []
+    logs = EventLog.objects.filter(event_type__in=["project.created", "project.deleted"]).order_by("-created_at")[:limit]
+    for log in logs:
+        title = _extract_logged_title(log)
+        if title:
+            log_titles.append(title)
+    seen: list[str] = []
+    for title in [*current_titles, *log_titles]:
+        if title and title not in seen:
+            seen.append(title)
+    return seen
+
+
 def estimate_duration_seconds(script: str, scene_plan: list[dict] | None = None) -> int:
     words = max(len(script.split()), 1)
     narration_seconds = ceil(words / 2.4)
@@ -127,7 +209,18 @@ def build_scene_plan(hook: str, beats: list[str], cta: str) -> list[dict]:
 
 
 def build_rule_based_topic(niche: str) -> ViralTopic:
-    template = random.choice(_topic_candidates(niche))
+    candidates = _topic_candidates(niche)
+    recent_titles = _recently_used_titles(niche)
+    recently_used = set(recent_titles)
+    latest_title = recent_titles[0] if recent_titles else ""
+    unused_candidates = [candidate for candidate in candidates if candidate["title"] not in recently_used]
+    if unused_candidates:
+        preferred_pool = [candidate for candidate in unused_candidates if candidate["title"] != latest_title]
+        template = random.choice(preferred_pool or unused_candidates)
+    else:
+        recency_index = {title: index for index, title in enumerate(recent_titles)}
+        non_latest_candidates = [candidate for candidate in candidates if candidate["title"] != latest_title] or candidates
+        template = max(non_latest_candidates, key=lambda candidate: recency_index.get(candidate["title"], len(candidates) + 100))
     hook = template["hook"]
     beats = list(template["beats"])
     cta = template["cta"]
