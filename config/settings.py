@@ -15,6 +15,11 @@ def env_or_default(name: str, default: str = "") -> str:
     value = value.strip()
     return value or default
 
+
+def csv_env(name: str, default: str = "") -> list[str]:
+    raw = env_or_default(name, default)
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-dev-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()]
@@ -105,6 +110,25 @@ CONTENT_GENERATION_MODEL = env_or_default("CONTENT_GENERATION_MODEL", "")
 OPENAI_API_KEY = env_or_default("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = env_or_default("OPENAI_BASE_URL", "https://api.openai.com/v1")
 OPENAI_CONTENT_MODEL = env_or_default("OPENAI_CONTENT_MODEL", "chat-latest")
+OPENROUTER_API_KEY = env_or_default("OPENROUTER_API_KEY", env_or_default("OPROUTER_API_KEY", ""))
+OPENROUTER_BASE_URL = env_or_default("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
+OPENROUTER_CONTENT_MODELS = csv_env(
+    "OPENROUTER_CONTENT_MODELS",
+    "x-ai/grok-beta,openai/gpt-4o-mini",
+)
+GROQ_API_KEY = env_or_default("GROQ_API_KEY", "")
+GROQ_BASE_URL = env_or_default("GROQ_BASE_URL", "https://api.groq.com/openai/v1")
+GROQ_CONTENT_MODELS = csv_env(
+    "GROQ_CONTENT_MODELS",
+    "llama-3.3-70b-versatile,llama-3.1-8b-instant",
+)
+HUGGINGFACE_TOKEN = env_or_default("HUGGINGFACE_TOKEN", "")
+HUGGINGFACE_BASE_URL = env_or_default("HUGGINGFACE_BASE_URL", "https://api-inference.huggingface.co/v1")
+HUGGINGFACE_CONTENT_MODELS = csv_env(
+    "HUGGINGFACE_CONTENT_MODELS",
+    "microsoft/Phi-3-mini-4k-instruct",
+)
+CONTENT_GENERATION_ALLOW_FALLBACKS = os.getenv("CONTENT_GENERATION_ALLOW_FALLBACKS", "True").lower() == "true"
 AUTOMATION_WEBHOOK_TOKEN = os.getenv("AUTOMATION_WEBHOOK_TOKEN", SECRET_KEY)
 YOUTUBE_CLIENT_ID = env_or_default("YOUTUBE_CLIENT_ID", "")
 YOUTUBE_CLIENT_SECRET = env_or_default("YOUTUBE_CLIENT_SECRET", "")
@@ -131,6 +155,9 @@ DEFAULT_VIDEO_HEIGHT = int(os.getenv("DEFAULT_VIDEO_HEIGHT", "1280"))
 DEFAULT_RENDER_FPS = int(os.getenv("DEFAULT_RENDER_FPS", "18"))
 MAX_SCENES_PER_VIDEO = int(os.getenv("MAX_SCENES_PER_VIDEO", "5"))
 USE_STOCK_MEDIA = os.getenv("USE_STOCK_MEDIA", "False").lower() == "true"
+DASHBOARD_STATUS_ACTIVE_POLL_MS = int(os.getenv("DASHBOARD_STATUS_ACTIVE_POLL_MS", "8000"))
+DASHBOARD_STATUS_IDLE_POLL_MS = int(os.getenv("DASHBOARD_STATUS_IDLE_POLL_MS", "30000"))
+DASHBOARD_STATUS_HIDDEN_POLL_MS = int(os.getenv("DASHBOARD_STATUS_HIDDEN_POLL_MS", "120000"))
 
 LOGGING = {
     "version": 1,

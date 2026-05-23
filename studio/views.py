@@ -64,7 +64,22 @@ def _provider_status_cards() -> list[dict]:
         {
             "name": "Gemini",
             "connected": bool(getattr(settings, "GEMINI_API_KEY", "")),
-            "note": "Optional script generation provider.",
+            "note": "Primary topic provider when quota is available.",
+        },
+        {
+            "name": "OpenRouter",
+            "connected": bool(getattr(settings, "OPENROUTER_API_KEY", "")),
+            "note": "Fallback topic provider chain.",
+        },
+        {
+            "name": "Groq",
+            "connected": bool(getattr(settings, "GROQ_API_KEY", "")),
+            "note": "Low-latency backup topic provider.",
+        },
+        {
+            "name": "Hugging Face",
+            "connected": bool(getattr(settings, "HUGGINGFACE_TOKEN", "")),
+            "note": "Last-resort backup topic provider.",
         },
         {
             "name": "Pexels",

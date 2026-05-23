@@ -4,6 +4,7 @@ from datetime import datetime
 from math import ceil
 import json
 import re
+from typing import Any
 
 import requests
 from django.conf import settings
@@ -21,26 +22,102 @@ JSON_ONLY_SYSTEM_PROMPT = (
 
 
 def _content_provider() -> str:
-    configured = getattr(settings, "CONTENT_GENERATION_PROVIDER", "auto").strip().lower()
-    if configured and configured != "auto":
-        return configured
-    if getattr(settings, "GEMINI_API_KEY", ""):
-        return "gemini"
-    if getattr(settings, "OPENAI_API_KEY", ""):
-        return "openai"
-    raise RuntimeError(
-        "No live content generation provider is configured. "
-        "Set GEMINI_API_KEY or OPENAI_API_KEY in the environment."
-    )
+    return getattr(settings, "CONTENT_GENERATION_PROVIDER", "auto").strip().lower() or "auto"
 
 
 def _default_model_for_provider(provider: str) -> str:
     configured_model = getattr(settings, "CONTENT_GENERATION_MODEL", "").strip()
-    if configured_model:
+    configured_provider = _content_provider()
+    if configured_model and configured_provider == provider:
         return configured_model
     if provider == "gemini":
         return "gemini-2.0-flash"
+    if provider == "openrouter":
+        models = getattr(settings, "OPENROUTER_CONTENT_MODELS", []) or ["x-ai/grok-beta"]
+        return models[0]
+    if provider == "groq":
+        models = getattr(settings, "GROQ_CONTENT_MODELS", []) or ["llama-3.3-70b-versatile"]
+        return models[0]
+    if provider == "huggingface":
+        models = getattr(settings, "HUGGINGFACE_CONTENT_MODELS", []) or ["microsoft/Phi-3-mini-4k-instruct"]
+        return models[0]
     return getattr(settings, "OPENAI_CONTENT_MODEL", "chat-latest")
+
+
+def _provider_api_key(provider: str) -> str:
+    key_map = {
+        "gemini": getattr(settings, "GEMINI_API_KEY", ""),
+        "openai": getattr(settings, "OPENAI_API_KEY", ""),
+        "openrouter": getattr(settings, "OPENROUTER_API_KEY", ""),
+        "groq": getattr(settings, "GROQ_API_KEY", ""),
+        "huggingface": getattr(settings, "HUGGINGFACE_TOKEN", ""),
+    }
+    return str(key_map.get(provider, "")).strip()
+
+
+def _provider_enabled(provider: str) -> bool:
+    return bool(_provider_api_key(provider))
+
+
+def _provider_models(provider: str) -> list[str]:
+    if provider == "openrouter":
+        return list(getattr(settings, "OPENROUTER_CONTENT_MODELS", []) or [_default_model_for_provider(provider)])
+    if provider == "groq":
+        return list(getattr(settings, "GROQ_CONTENT_MODELS", []) or [_default_model_for_provider(provider)])
+    if provider == "huggingface":
+        return list(getattr(settings, "HUGGINGFACE_CONTENT_MODELS", []) or [_default_model_for_provider(provider)])
+    return [_default_model_for_provider(provider)]
+
+
+def _provider_base_url(provider: str) -> str:
+    if provider == "openrouter":
+        return getattr(settings, "OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1").rstrip("/")
+    if provider == "groq":
+        return getattr(settings, "GROQ_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
+    if provider == "huggingface":
+        return getattr(settings, "HUGGINGFACE_BASE_URL", "https://api-inference.huggingface.co/v1").rstrip("/")
+    return getattr(settings, "OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+
+
+def _provider_order() -> list[str]:
+    configured = _content_provider()
+    default_order = ["gemini", "openrouter", "groq", "openai", "huggingface"]
+    if configured == "auto":
+        return default_order
+    if configured not in default_order:
+        raise RuntimeError(f"Unsupported content generation provider: {configured}")
+    return [configured, *[provider for provider in default_order if provider != configured]]
+
+
+def _generation_candidates() -> list[dict[str, str]]:
+    candidates: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    allow_fallbacks = getattr(settings, "CONTENT_GENERATION_ALLOW_FALLBACKS", True)
+    configured_provider = _content_provider()
+    for provider in _provider_order():
+        if not _provider_enabled(provider):
+            continue
+        for model in _provider_models(provider):
+            key = (provider, model)
+            if key in seen:
+                continue
+            seen.add(key)
+            candidates.append(
+                {
+                    "provider": provider,
+                    "model": model,
+                    "api_key": _provider_api_key(provider),
+                    "base_url": _provider_base_url(provider),
+                }
+            )
+        if configured_provider != "auto" and not allow_fallbacks:
+            break
+    if candidates:
+        return candidates
+    raise RuntimeError(
+        "No live content generation provider is configured. "
+        "Set at least one of GEMINI_API_KEY, OPENROUTER_API_KEY, GROQ_API_KEY, OPENAI_API_KEY, or HUGGINGFACE_TOKEN."
+    )
 
 
 def _niche_label(niche: str) -> str:
@@ -177,7 +254,7 @@ def _topic_prompt(niche: str) -> str:
 
 
 def _gemini_generate(prompt: str) -> dict:
-    api_key = getattr(settings, "GEMINI_API_KEY", "").strip()
+    api_key = _provider_api_key("gemini")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is missing.")
     model = _default_model_for_provider("gemini")
@@ -211,21 +288,44 @@ def _gemini_generate(prompt: str) -> dict:
     return _extract_json_object(text)
 
 
-def _openai_generate(prompt: str) -> dict:
-    api_key = getattr(settings, "OPENAI_API_KEY", "").strip()
+def _extract_message_text(message: Any) -> str:
+    if isinstance(message, str):
+        return message.strip()
+    if isinstance(message, list):
+        parts: list[str] = []
+        for item in message:
+            if isinstance(item, str):
+                parts.append(item)
+                continue
+            if isinstance(item, dict):
+                text = item.get("text")
+                if text:
+                    parts.append(str(text))
+        return "".join(parts).strip()
+    if isinstance(message, dict):
+        content = message.get("content")
+        if content is not None:
+            return _extract_message_text(content)
+    return ""
+
+
+def _openai_compatible_generate(prompt: str, *, provider: str, model: str, base_url: str, api_key: str) -> dict:
     if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is missing.")
-    model = _default_model_for_provider("openai")
-    base_url = getattr(settings, "OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+        raise RuntimeError(f"{provider.title()} API key is missing.")
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    if provider == "openrouter":
+        headers["HTTP-Referer"] = getattr(settings, "APP_BASE_URL", "http://127.0.0.1:8000")
+        headers["X-Title"] = getattr(settings, "CHANNEL_BRAND_NAME", "DarkBrainScroll")
     response = requests.post(
         f"{base_url}/chat/completions",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+        headers=headers,
         json={
             "model": model,
             "temperature": 0.9,
+            "response_format": {"type": "json_object"},
             "messages": [
                 {"role": "system", "content": JSON_ONLY_SYSTEM_PROMPT},
                 {"role": "user", "content": prompt},
@@ -238,26 +338,43 @@ def _openai_generate(prompt: str) -> dict:
             error_message = response.json().get("error", {}).get("message", response.text)
         except ValueError:
             error_message = response.text
-        raise RuntimeError(f"OpenAI-compatible topic generation failed: {truncate_text(error_message, 300)}")
+        raise RuntimeError(f"{provider.title()} topic generation failed: {truncate_text(error_message, 300)}")
     payload = response.json()
     choices = payload.get("choices") or []
     if not choices:
-        raise RuntimeError("OpenAI-compatible provider returned no choices.")
+        raise RuntimeError(f"{provider.title()} returned no choices.")
     message = choices[0].get("message", {})
-    text = (message.get("content") or "").strip()
+    text = _extract_message_text(message.get("content"))
     if not text:
-        raise RuntimeError("OpenAI-compatible provider returned empty content.")
+        raise RuntimeError(f"{provider.title()} returned empty content.")
     return _extract_json_object(text)
 
 
-def _generate_topic_payload(niche: str) -> dict:
-    provider = _content_provider()
+def _generate_topic_payload(niche: str) -> tuple[dict, str, str]:
     prompt = _topic_prompt(niche)
-    if provider == "gemini":
-        return _gemini_generate(prompt)
-    if provider in {"openai", "openrouter"}:
-        return _openai_generate(prompt)
-    raise RuntimeError(f"Unsupported content generation provider: {provider}")
+    failures: list[str] = []
+    for candidate in _generation_candidates():
+        provider = candidate["provider"]
+        model = candidate["model"]
+        try:
+            if provider == "gemini":
+                return _gemini_generate(prompt), provider, model
+            if provider in {"openai", "openrouter", "groq", "huggingface"}:
+                return (
+                    _openai_compatible_generate(
+                        prompt,
+                        provider=provider,
+                        model=model,
+                        base_url=candidate["base_url"],
+                        api_key=candidate["api_key"],
+                    ),
+                    provider,
+                    model,
+                )
+            failures.append(f"{provider}/{model}: unsupported provider")
+        except Exception as exc:
+            failures.append(f"{provider}/{model}: {truncate_text(str(exc), 220)}")
+    raise RuntimeError("All topic generation providers failed. " + " | ".join(failures))
 
 
 def _normalize_hashtags(raw_hashtags) -> list[str]:
@@ -304,7 +421,7 @@ def _normalize_asset_packs(raw_packs) -> list[str]:
     return packs[:6]
 
 
-def _validate_topic_payload(payload: dict, niche: str) -> dict:
+def _validate_topic_payload(payload: dict, niche: str, provider: str, model: str) -> dict:
     topics = payload.get("topics")
     if not isinstance(topics, list) or not topics:
         raise RuntimeError("Content generator returned no topics.")
@@ -328,15 +445,16 @@ def _validate_topic_payload(payload: dict, niche: str) -> dict:
         "hashtags": _normalize_hashtags(first_topic.get("hashtags", [])),
         "asset_packs": _normalize_asset_packs(first_topic.get("asset_packs", [])),
         "visuals": visuals,
-        "provider": _content_provider(),
-        "model": _default_model_for_provider(_content_provider()),
+        "provider": provider,
+        "model": model,
         "generated_at": datetime.utcnow().isoformat(timespec="seconds") + "Z",
         "niche": niche,
     }
 
 
 def build_ai_topic(niche: str) -> ViralTopic:
-    payload = _validate_topic_payload(_generate_topic_payload(niche), niche)
+    raw_payload, provider, model = _generate_topic_payload(niche)
+    payload = _validate_topic_payload(raw_payload, niche, provider, model)
     script_lines = [payload["intro"], *payload["bullets"], payload["cta"]]
     script = "\n".join(script_lines)
     scene_plan = build_scene_plan(payload["intro"], payload["bullets"], payload["cta"], visuals=payload["visuals"])
