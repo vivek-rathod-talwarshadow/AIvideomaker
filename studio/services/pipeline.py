@@ -10,7 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from studio.enums import JobStatus, PlatformType
-from studio.models import AutomationState, ChannelProfile, EventLog, PublishJob, SchedulerLock, VideoProject
+from studio.models import AutomationState, ChannelProfile, EventLog, PublishJob, SchedulerLock, VideoProject, ViralTopic
 from .logging_service import log_event
 from .renderer import render_slideshow_video
 from .source_fetcher import fetch_scene_assets
@@ -40,6 +40,35 @@ AUTOMATION_NICHE_ORDER = (
     "quotes",
     "theory",
 )
+
+
+def _project_video_dimensions() -> tuple[int, int]:
+    width = max(360, int(getattr(settings, "DEFAULT_VIDEO_WIDTH", 720)))
+    height = max(640, int(getattr(settings, "DEFAULT_VIDEO_HEIGHT", 1280)))
+    return width, height
+
+
+def _recent_automation_entries(limit: int = 100) -> list[dict]:
+    entries: list[dict] = []
+    logs = EventLog.objects.filter(event_type="project.created").order_by("-created_at")[:limit]
+    for log in logs:
+        payload = log.payload or {}
+        if payload.get("automation") is False:
+            continue
+        title = str(payload.get("title") or "").strip()
+        niche = str(payload.get("niche") or "").strip()
+        if title or niche:
+            entries.append({"title": title, "niche": niche})
+    return entries
+
+
+def _automation_projects_created_today() -> int:
+    today = timezone.localdate()
+    return EventLog.objects.filter(
+        event_type="project.created",
+        created_at__date=today,
+        payload__automation=True,
+    ).count()
 
 
 def acquire_lock(key: str) -> bool:
@@ -308,9 +337,11 @@ def get_or_create_default_channel(platform: str) -> ChannelProfile:
 
 
 def _select_automation_niche() -> str:
-    recent_niches = list(
-        VideoProject.objects.order_by("-created_at").values_list("niche", flat=True)[: len(AUTOMATION_NICHE_ORDER) * 2]
-    )
+    recent_niches = [
+        entry["niche"]
+        for entry in _recent_automation_entries(limit=len(AUTOMATION_NICHE_ORDER) * 4)
+        if entry["niche"] in AUTOMATION_NICHE_ORDER
+    ]
     for niche in AUTOMATION_NICHE_ORDER:
         if niche not in recent_niches:
             return niche
@@ -321,6 +352,34 @@ def _select_automation_niche() -> str:
     return AUTOMATION_NICHE_ORDER[0]
 
 
+def _title_used_recently(title: str, limit: int = 60) -> bool:
+    normalized = title.strip().lower()
+    if not normalized:
+        return False
+    for entry in _recent_automation_entries(limit=limit):
+        if entry["title"].strip().lower() == normalized:
+            return True
+    return False
+
+
+def _ordered_automation_niches() -> list[str]:
+    preferred = _select_automation_niche()
+    if preferred not in AUTOMATION_NICHE_ORDER:
+        return list(AUTOMATION_NICHE_ORDER)
+    start_index = AUTOMATION_NICHE_ORDER.index(preferred)
+    return list(AUTOMATION_NICHE_ORDER[start_index:]) + list(AUTOMATION_NICHE_ORDER[:start_index])
+
+
+def _build_unique_automation_topic() -> ViralTopic:
+    for niche in _ordered_automation_niches():
+        candidate = build_rule_based_topic(niche)
+        if not _title_used_recently(candidate.title, limit=60):
+            return candidate
+        candidate.delete()
+    fallback_niche = _select_automation_niche()
+    return build_rule_based_topic(fallback_niche)
+
+
 def _has_pending_project() -> bool:
     return VideoProject.objects.filter(
         status__in=[JobStatus.QUEUED, JobStatus.GENERATING, JobStatus.READY, JobStatus.POSTING]
@@ -328,8 +387,7 @@ def _has_pending_project() -> bool:
 
 
 def create_daily_project_if_needed() -> VideoProject | None:
-    today = timezone.localdate()
-    created_today = VideoProject.objects.filter(created_at__date=today).count()
+    created_today = _automation_projects_created_today()
     if created_today >= settings.MAX_VIDEOS_PER_DAY:
         return None
     enabled_platforms = get_enabled_platforms()
@@ -347,12 +405,15 @@ def create_daily_project_if_needed() -> VideoProject | None:
         )
         return None
 
-    topic = build_rule_based_topic(_select_automation_niche())
+    topic = _build_unique_automation_topic()
     duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
+    target_width, target_height = _project_video_dimensions()
     project = VideoProject.objects.create(
         topic=topic,
         niche=topic.niche,
         status=JobStatus.QUEUED,
+        target_width=target_width,
+        target_height=target_height,
         content_signature=stable_hash([topic.niche, topic.title.strip().lower(), " ".join(topic.script.lower().split())]),
         duration_seconds=duration_seconds,
         progress_percent=5,
@@ -389,10 +450,13 @@ def create_project(niche: str = "facts") -> VideoProject:
     niche = niche or _select_automation_niche()
     topic = build_rule_based_topic(niche)
     duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
+    target_width, target_height = _project_video_dimensions()
     project = VideoProject.objects.create(
         topic=topic,
         niche=topic.niche,
         status=JobStatus.QUEUED,
+        target_width=target_width,
+        target_height=target_height,
         content_signature=stable_hash([topic.niche, topic.title.strip().lower(), " ".join(topic.script.lower().split())]),
         duration_seconds=duration_seconds,
         caption_style={

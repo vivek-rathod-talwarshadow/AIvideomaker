@@ -4,6 +4,7 @@ from math import ceil
 import random
 import re
 
+from django.conf import settings
 from studio.enums import ContentNiche
 from studio.models import EventLog, ViralTopic
 from .utils import stable_hash
@@ -589,10 +590,12 @@ def _extract_logged_title(log: EventLog) -> str:
     return ""
 
 
-def _recently_used_titles(niche: str, limit: int = 12) -> list[str]:
+def _recently_used_titles(niche: str, limit: int = 40) -> list[str]:
     current_titles = list(ViralTopic.objects.filter(niche=niche).values_list("title", flat=True))
     log_titles: list[str] = []
-    logs = EventLog.objects.filter(event_type__in=["project.created", "project.deleted"]).order_by("-created_at")[:limit]
+    logs = EventLog.objects.filter(
+        event_type__in=["project.created", "project.deleted", "publish.success"]
+    ).order_by("-created_at")[:limit]
     for log in logs:
         title = _extract_logged_title(log)
         if title:
@@ -638,6 +641,9 @@ def build_rule_based_topic(niche: str) -> ViralTopic:
         template = max(non_latest_candidates, key=lambda candidate: recency_index.get(candidate["title"], len(candidates) + 100))
     hook = template["hook"]
     beats = list(template["beats"])
+    max_scenes = max(3, int(getattr(settings, "MAX_SCENES_PER_VIDEO", 5)))
+    max_beats = max(1, max_scenes - 2)
+    beats = beats[:max_beats]
     cta = template["cta"]
     title = template["title"]
     script_lines = [hook, *beats, cta]

@@ -27,6 +27,11 @@ NICHE_QUERY_HINTS = {
     "motivation": ["athlete training", "sunrise running", "focus work", "success mindset"],
     "reddit": ["person reading phone", "night room", "anonymous story", "dramatic portrait"],
 }
+STOPWORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "because", "but", "by", "can", "do", "does", "for", "from", "has",
+    "have", "if", "in", "into", "is", "it", "its", "like", "more", "of", "on", "or", "so", "than", "that", "the",
+    "their", "them", "they", "this", "to", "up", "was", "were", "with", "you", "your",
+}
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -84,14 +89,36 @@ def _create_scene_slide(project: VideoProject, scene: dict, index: int, output_p
     image.save(output_path, quality=92)
 
 
+def _scene_keyword_phrase(text: str, max_words: int = 6) -> str:
+    words = []
+    for raw_word in text.replace("-", " ").split():
+        cleaned = "".join(char for char in raw_word.lower() if char.isalnum())
+        if not cleaned or cleaned in STOPWORDS or len(cleaned) < 3:
+            continue
+        words.append(cleaned)
+    unique_words: list[str] = []
+    for word in words:
+        if word not in unique_words:
+            unique_words.append(word)
+    return " ".join(unique_words[:max_words])
+
+
+def _scene_prefers_placeholder(scene: dict) -> bool:
+    text = (scene.get("text") or "").strip().lower()
+    return text.startswith("follow ") or "darkbrainscroll" in text
+
+
 def _build_scene_queries(project: VideoProject, scene: dict) -> list[str]:
-    topic_title = project.topic.title.replace("?", "").strip()
     scene_text = scene.get("text", "").strip()
+    keyword_phrase = _scene_keyword_phrase(scene_text)
     candidates = [
-        f"{topic_title} concept",
+        keyword_phrase,
+        f"{keyword_phrase} realistic photo" if keyword_phrase else "",
         scene_text,
-        f"{scene_text} realistic photo",
-        f"{project.niche} vertical background",
+        f"{keyword_phrase} wildlife photo" if project.niche == "animals" and keyword_phrase else "",
+        f"{keyword_phrase} historical photo" if project.niche in ["facts", "mythology", "celebrity"] and keyword_phrase else "",
+        f"{keyword_phrase} science illustration" if project.niche in ["facts", "space", "body", "tech"] and keyword_phrase else "",
+        f"{project.niche} {keyword_phrase}" if keyword_phrase else "",
     ]
     candidates.extend(NICHE_QUERY_HINTS.get(project.niche, []))
     queries: list[str] = []
@@ -271,6 +298,9 @@ def fetch_scene_assets(project: VideoProject, replace_existing: bool = False) ->
     if project.assets.exists():
         return list(project.assets.order_by("sort_order"))
 
+    if not getattr(settings, "USE_STOCK_MEDIA", False):
+        return fetch_placeholder_assets(project)
+
     scene_dir = media_dir("projects", str(project.id), "assets")
     assets: list[MediaAsset] = []
     used_urls: set[str] = set()
@@ -279,13 +309,14 @@ def fetch_scene_assets(project: VideoProject, replace_existing: bool = False) ->
         prompt = slugify_text(scene.get("text", f"scene-{index+1}"))
         output_path = Path(scene_dir / f"{index+1:02d}-{prompt}.jpg")
         stock_result = None
-        for query in _build_scene_queries(project, scene):
-            try:
-                stock_result = _resolve_stock_image(query, output_path, used_urls)
-            except requests.RequestException:
-                continue
-            if stock_result:
-                break
+        if not _scene_prefers_placeholder(scene):
+            for query in _build_scene_queries(project, scene):
+                try:
+                    stock_result = _resolve_stock_image(query, output_path, used_urls)
+                except requests.RequestException:
+                    continue
+                if stock_result:
+                    break
 
         if not stock_result:
             output_path = Path(scene_dir / f"{index+1:02d}-{prompt}.png")

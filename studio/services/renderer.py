@@ -34,7 +34,7 @@ FINAL_RENDER_ARGS = [
     "128k",
 ]
 
-RENDER_FPS = 24
+RENDER_FPS = max(12, int(getattr(settings, "DEFAULT_RENDER_FPS", 18)))
 
 
 def _resolve_binary(name: str) -> str | None:
