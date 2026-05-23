@@ -4,6 +4,7 @@ from math import ceil
 from pathlib import Path
 import shutil
 import subprocess
+from typing import Callable
 
 from django.conf import settings
 
@@ -18,9 +19,9 @@ VIDEO_ONLY_ARGS = [
     "-c:v",
     "libx264",
     "-preset",
-    "veryfast",
+    "ultrafast",
     "-crf",
-    "24",
+    "28",
     "-movflags",
     "+faststart",
 ]
@@ -30,8 +31,10 @@ FINAL_RENDER_ARGS = [
     "-c:a",
     "aac",
     "-b:a",
-    "192k",
+    "128k",
 ]
+
+RENDER_FPS = 24
 
 
 def _resolve_binary(name: str) -> str | None:
@@ -154,8 +157,8 @@ def _render_scene_clip(
             f"z='min(zoom+0.0009,1.18)':"
             f"x='iw/2-(iw/zoom/2)':"
             f"y='ih/2-(ih/zoom/2)':"
-            f"d={duration * 30}:"
-            f"s={project.target_width}x{project.target_height}:fps=30"
+            f"d={duration * RENDER_FPS}:"
+            f"s={project.target_width}x{project.target_height}:fps={RENDER_FPS}"
         ),
         "format=yuv420p",
         "drawbox=x=52:y=h-180:w=976:h=86:color=black@0.28:t=fill",
@@ -181,7 +184,7 @@ def _render_scene_clip(
         "-vf",
         ",".join(vf_parts),
         "-r",
-        "30",
+        str(RENDER_FPS),
         *VIDEO_ONLY_ARGS,
         str(clip_path),
     ]
@@ -207,7 +210,7 @@ def _render_scene_clip(
                 ]
             ),
             "-r",
-            "30",
+            str(RENDER_FPS),
             *VIDEO_ONLY_ARGS,
             str(clip_path),
         ]
@@ -218,7 +221,10 @@ def _render_scene_clip(
             raise RuntimeError(f"ffmpeg scene render failed for {asset.local_path}: {stderr or exc}") from exc
 
 
-def render_slideshow_video(project: VideoProject) -> str:
+def render_slideshow_video(
+    project: VideoProject,
+    progress_callback: Callable[[int, str], None] | None = None,
+) -> str:
     output_dir = media_dir("projects", str(project.id), "output")
     clips_dir = media_dir("projects", str(project.id), "output", "clips")
     output_path = output_dir / "final.mp4"
@@ -239,15 +245,22 @@ def render_slideshow_video(project: VideoProject) -> str:
 
     durations = _scene_durations(project, len(assets))
     clip_paths: list[Path] = []
+    if progress_callback:
+        progress_callback(76, f"Rendering scene 1 of {len(assets)}...")
     for index, (asset, duration) in enumerate(zip(assets, durations), start=1):
         clip_path = clips_dir / f"scene-{index:02d}.mp4"
         _render_scene_clip(project, ffmpeg_path, asset, clip_path, duration)
         clip_paths.append(clip_path)
+        if progress_callback and index < len(assets):
+            progress = min(90, 76 + round((index / len(assets)) * 12))
+            progress_callback(progress, f"Rendering scene {index + 1} of {len(assets)}...")
 
     concat_manifest.write_text(
         "\n".join(f"file '{clip_path.resolve().as_posix()}'" for clip_path in clip_paths),
         encoding="utf-8",
     )
+    if progress_callback:
+        progress_callback(91, "Assembling scene clips...")
     subprocess.run(
         [
             ffmpeg_path,
@@ -296,6 +309,8 @@ def render_slideshow_video(project: VideoProject) -> str:
             str(output_path),
         ]
     )
+    if progress_callback:
+        progress_callback(95, "Finalizing video with audio and captions...")
     try:
         subprocess.run(final_command, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:

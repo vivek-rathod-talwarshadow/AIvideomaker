@@ -466,7 +466,7 @@ def generate_project_media(project: VideoProject) -> None:
     generate_basic_srt(project)
     set_project_progress(project, 75, "Rendering slideshow video...")
     log_event("project.render_started", "Rendering animated video with captions.", project=project)
-    render_slideshow_video(project)
+    render_slideshow_video(project, progress_callback=lambda percent, message: set_project_progress(project, percent, message))
     _ensure_output_fingerprint(project)
     set_project_progress(project, 100, "Preview ready for upload.")
     log_event("project.rendered", "Project assets and video generated.", project=project)
