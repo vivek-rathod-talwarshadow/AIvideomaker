@@ -10,6 +10,10 @@ services:
         value: config.settings
       - key: DJANGO_DEBUG
         value: "False"
+      - key: RENDER_SLEEP_FRIENDLY_MODE
+        value: "True"
+      - key: ENABLE_SCHEDULER
+        value: "False"
       - key: DATABASE_URL
         fromDatabase:
           name: viralforge-db

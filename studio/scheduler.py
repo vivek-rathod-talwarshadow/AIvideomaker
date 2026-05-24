@@ -18,6 +18,8 @@ def boot_scheduler() -> None:
     global _scheduler
 
     if not settings.ENABLE_SCHEDULER:
+        if getattr(settings, "RENDER_SLEEP_FRIENDLY_MODE", False):
+            logger.info("Scheduler skipped because Render sleep-friendly mode is enabled.")
         return
     if BackgroundScheduler is None:
         logger.warning("APScheduler is not installed; automation scheduler is disabled.")

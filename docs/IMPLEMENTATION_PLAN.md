@@ -10,7 +10,7 @@ Build a stable, low-RAM, mostly free automation platform that creates lightweigh
 
 - `web`: single Django service on Render Free using Docker
 - `db`: Render Postgres Free for persistent relational data
-- `scheduler`: APScheduler inside the Django web process
+- `scheduler`: GitHub Actions trigger on Render Free, APScheduler only when always-on hosting is acceptable
 - `queue`: database-backed queue using `PublishJob`
 - `media`: ephemeral local filesystem for temporary render artifacts
 
@@ -41,9 +41,9 @@ Bundle `ffmpeg` through Docker on Render. This is the cleanest way to avoid nati
 
 ### Recommended free reliability options
 
-1. Use `APScheduler` plus a free uptime pinger every 10 minutes.
-2. Or use GitHub Actions scheduled workflow to hit `/automation/run-once/`.
-3. Or accept best-effort automation only while the service is awake.
+1. Use GitHub Actions scheduled workflow to hit `/automation/run-once/` once or twice per day.
+2. Or accept best-effort automation only while the service is awake.
+3. Use `APScheduler` only on local development or paid always-on hosting.
 
 ## 3. Folder structure
 

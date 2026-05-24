@@ -2,7 +2,8 @@ name: Automation Ping
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "35 4 * * *"
+    - cron: "35 13 * * *"
   workflow_dispatch:
 
 jobs:
@@ -11,6 +12,6 @@ jobs:
     steps:
       - name: Call automation endpoint
         run: |
-          curl -X POST "${{ secrets.AUTOMATION_ENDPOINT }}" \
+          curl --fail --silent --show-error --max-time 180 -X POST "${{ secrets.AUTOMATION_ENDPOINT }}" \
             -H "X-Automation-Token: ${{ secrets.AUTOMATION_WEBHOOK_TOKEN }}" \
             -H "Content-Type: application/json"

@@ -6,7 +6,7 @@ Render-friendly Django platform for generating lightweight vertical slideshow vi
 
 - Django project scaffold optimized for low CPU and RAM usage
 - Database-backed content pipeline and publish queue
-- APScheduler-based single-process automation
+- Sleep-friendly automation with optional APScheduler support
 - Lightweight video generation services using `ffmpeg`, `moviepy`, `Pillow`, and `edge-tts`
 - Upload adapter structure for YouTube, Instagram, and Pinterest
 - Real YouTube Shorts upload flow using the official YouTube Data API
@@ -19,9 +19,19 @@ Render-friendly Django platform for generating lightweight vertical slideshow vi
 - Render cron jobs are not fully free.
 - This architecture therefore uses:
   - one Django web service
-  - one in-process scheduler
+  - one optional in-process scheduler
   - a DB queue
-  - optional free keep-alive or GitHub Actions trigger for reliable automation
+  - optional GitHub Actions trigger for reliable automation
+
+## Render free-tier safety
+
+- A constant in-process scheduler or a frequent uptime ping can consume Render Free instance hours and suspend the service for the rest of the billing month.
+- This repo now defaults to a sleep-friendly deployment on Render:
+  - `ENABLE_SCHEDULER=False`
+  - `RENDER_SLEEP_FRIENDLY_MODE=True`
+  - GitHub Actions automation runs twice per day instead of every 30 minutes
+- The website still wakes up and works when someone visits it, but it no longer tries to stay awake all month.
+- If you need near-continuous automation, use a paid Render plan or explicitly re-enable the scheduler.
 
 ## Quick start
 
@@ -55,7 +65,7 @@ See `.env.example` for required settings.
 - Voiceover: `edge-tts`
 - Media sourcing: Pexels, Pixabay, Reddit JSON, Wikimedia/Wikipedia
 - Video render: `ffmpeg` with simple slideshow transitions
-- Scheduler: APScheduler
+- Scheduler: GitHub Actions trigger on Render Free, APScheduler for local or paid always-on deployments
 - Database: SQLite locally, Render Postgres in deployment
 
 ## Deployment note

@@ -20,6 +20,13 @@ def csv_env(name: str, default: str = "") -> list[str]:
     raw = env_or_default(name, default)
     return [item.strip() for item in raw.split(",") if item.strip()]
 
+
+def bool_env(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() == "true"
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "unsafe-dev-key")
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 ALLOWED_HOSTS = [host.strip() for host in os.getenv("DJANGO_ALLOWED_HOSTS", "*").split(",") if host.strip()]
@@ -97,7 +104,9 @@ CSRF_TRUSTED_ORIGINS = [
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 
 APP_BASE_URL = os.getenv("APP_BASE_URL", "http://127.0.0.1:8000")
-ENABLE_SCHEDULER = os.getenv("ENABLE_SCHEDULER", "True").lower() == "true"
+IS_RENDER = bool(os.getenv("RENDER")) or bool(os.getenv("RENDER_EXTERNAL_URL"))
+RENDER_SLEEP_FRIENDLY_MODE = bool_env("RENDER_SLEEP_FRIENDLY_MODE", IS_RENDER)
+ENABLE_SCHEDULER = bool_env("ENABLE_SCHEDULER", not RENDER_SLEEP_FRIENDLY_MODE)
 SCHEDULER_POLL_SECONDS = int(os.getenv("SCHEDULER_POLL_SECONDS", "120"))
 MAX_VIDEOS_PER_DAY = int(os.getenv("MAX_VIDEOS_PER_DAY", "2"))
 JOB_LOCK_TTL_SECONDS = int(os.getenv("JOB_LOCK_TTL_SECONDS", "7200"))
