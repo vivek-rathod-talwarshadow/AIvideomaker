@@ -27,11 +27,24 @@ NICHE_QUERY_HINTS = {
     "motivation": ["athlete training", "sunrise running", "focus work", "success mindset"],
     "reddit": ["person reading phone", "night room", "anonymous story", "dramatic portrait"],
 }
+NICHE_PROVIDER_ORDER = {
+    "animals": ("pexels", "pixabay", "wikimedia"),
+    "motivation": ("pexels", "pixabay", "wikimedia"),
+    "celebrity": ("wikimedia", "pexels", "pixabay"),
+    "crime": ("wikimedia", "pexels", "pixabay"),
+    "history": ("wikimedia", "pexels", "pixabay"),
+    "mythology": ("wikimedia", "pexels", "pixabay"),
+    "space": ("wikimedia", "pexels", "pixabay"),
+    "body": ("wikimedia", "pexels", "pixabay"),
+    "facts": ("wikimedia", "pexels", "pixabay"),
+}
+DEFAULT_PROVIDER_ORDER = ("pexels", "pixabay", "wikimedia")
 STOPWORDS = {
     "a", "an", "and", "are", "as", "at", "be", "because", "but", "by", "can", "do", "does", "for", "from", "has",
     "have", "if", "in", "into", "is", "it", "its", "like", "more", "of", "on", "or", "so", "than", "that", "the",
     "their", "them", "they", "this", "to", "up", "was", "were", "with", "you", "your",
 }
+PLACEHOLDER_ONLY_MARKERS = {"follow ", "subscribe", "like and follow", "for more facts"}
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -105,24 +118,52 @@ def _scene_keyword_phrase(text: str, max_words: int = 6) -> str:
 
 def _scene_prefers_placeholder(scene: dict) -> bool:
     text = (scene.get("text") or "").strip().lower()
-    return text.startswith("follow ") or "darkbrainscroll" in text
+    return any(marker in text for marker in PLACEHOLDER_ONLY_MARKERS) or "darkbrainscroll" in text
+
+
+def _topic_keyword_phrase(project: VideoProject, max_words: int = 8) -> str:
+    script = " ".join(str(scene.get("text") or "") for scene in list(project.topic.scene_plan or [])[:4])
+    return _scene_keyword_phrase(f"{project.topic.title} {project.niche} {script}", max_words=max_words)
+
+
+def _asset_pack_terms(project: VideoProject, limit: int = 2) -> list[str]:
+    terms: list[str] = []
+    for note in project.topic.source_notes or []:
+        if not str(note).startswith("asset-pack:"):
+            continue
+        value = str(note).split(":", 1)[1].strip()
+        if value and value.lower() not in {item.lower() for item in terms}:
+            terms.append(value)
+        if len(terms) >= limit:
+            break
+    return terms
 
 
 def _build_scene_queries(project: VideoProject, scene: dict) -> list[str]:
     scene_text = scene.get("text", "").strip()
     visual_hint = str(scene.get("visual_hint") or "").strip()
     keyword_phrase = _scene_keyword_phrase(scene_text)
+    topic_keywords = _topic_keyword_phrase(project)
+    asset_packs = _asset_pack_terms(project)
     candidates = [
         visual_hint,
         f"{visual_hint} realistic photo" if visual_hint else "",
+        f"{visual_hint} vertical photo" if visual_hint else "",
         keyword_phrase,
         f"{keyword_phrase} realistic photo" if keyword_phrase else "",
+        f"{keyword_phrase} documentary photo" if keyword_phrase else "",
+        f"{project.topic.title} photo" if len(project.topic.title.split()) <= 8 else "",
+        f"{project.niche} {topic_keywords}" if topic_keywords else "",
+        f"{project.niche} {keyword_phrase} photo" if keyword_phrase else "",
         scene_text,
         f"{keyword_phrase} wildlife photo" if project.niche == "animals" and keyword_phrase else "",
         f"{keyword_phrase} historical photo" if project.niche in ["facts", "mythology", "celebrity"] and keyword_phrase else "",
         f"{keyword_phrase} science illustration" if project.niche in ["facts", "space", "body", "tech"] and keyword_phrase else "",
         f"{project.niche} {keyword_phrase}" if keyword_phrase else "",
     ]
+    for pack in asset_packs:
+        candidates.append(f"{pack} {keyword_phrase}".strip())
+        candidates.append(f"{pack} {visual_hint}".strip())
     candidates.extend(NICHE_QUERY_HINTS.get(project.niche, []))
     queries: list[str] = []
     seen: set[str] = set()
@@ -199,12 +240,22 @@ def _wikimedia_candidates(query: str, per_page: int = 6) -> list[dict]:
     return list(pages.values())
 
 
-def _resolve_stock_image(query: str, output_path: Path, used_urls: set[str]) -> dict | None:
+def _provider_search_order(project: VideoProject) -> tuple[str, ...]:
+    return NICHE_PROVIDER_ORDER.get(project.niche, DEFAULT_PROVIDER_ORDER)
+
+
+def _query_budget() -> tuple[int, int]:
+    max_queries = max(1, int(getattr(settings, "STOCK_MEDIA_MAX_SEARCH_QUERIES_PER_SCENE", 2)))
+    per_page = max(1, min(8, int(getattr(settings, "STOCK_MEDIA_MAX_CANDIDATES_PER_QUERY", 4))))
+    return max_queries, per_page
+
+
+def _resolve_pexels_image(query: str, output_path: Path, used_urls: set[str], per_page: int) -> dict | None:
     try:
-        pexels_photos = _pexels_candidates(query)
+        photos = _pexels_candidates(query, per_page=per_page)
     except requests.RequestException:
-        pexels_photos = []
-    for photo in pexels_photos:
+        return None
+    for photo in photos:
         candidate_url = (
             photo.get("src", {}).get("portrait")
             or photo.get("src", {}).get("large2x")
@@ -214,57 +265,69 @@ def _resolve_stock_image(query: str, output_path: Path, used_urls: set[str]) -> 
             continue
         _download_image(candidate_url, output_path)
         used_urls.add(candidate_url)
-        photographer = photo.get("photographer", "")
-        pexels_url = photo.get("url", "")
         return {
             "provider": "pexels",
-            "credit": photographer,
-            "source_url": pexels_url,
+            "credit": photo.get("photographer", ""),
+            "source_url": photo.get("url", ""),
             "remote_asset_url": candidate_url,
             "query": query,
         }
+    return None
 
+
+def _resolve_pixabay_image(query: str, output_path: Path, used_urls: set[str], per_page: int) -> dict | None:
     try:
-        pixabay_photos = _pixabay_candidates(query)
+        photos = _pixabay_candidates(query, per_page=per_page)
     except requests.RequestException:
-        pixabay_photos = []
-    for photo in pixabay_photos:
+        return None
+    for photo in photos:
         candidate_url = photo.get("largeImageURL") or photo.get("webformatURL")
         if not candidate_url or candidate_url in used_urls:
             continue
         _download_image(candidate_url, output_path)
         used_urls.add(candidate_url)
-        photographer = photo.get("user", "")
-        page_url = photo.get("pageURL", "")
         return {
             "provider": "pixabay",
-            "credit": photographer,
-            "source_url": page_url,
+            "credit": photo.get("user", ""),
+            "source_url": photo.get("pageURL", ""),
             "remote_asset_url": candidate_url,
             "query": query,
         }
+    return None
 
+
+def _resolve_wikimedia_image(query: str, output_path: Path, used_urls: set[str], per_page: int) -> dict | None:
     try:
-        wikimedia_photos = _wikimedia_candidates(query)
+        photos = _wikimedia_candidates(query, per_page=per_page)
     except requests.RequestException:
-        wikimedia_photos = []
-    for photo in wikimedia_photos:
+        return None
+    for photo in photos:
         image_info = (photo.get("imageinfo") or [{}])[0]
         candidate_url = image_info.get("thumburl") or image_info.get("url")
         if not candidate_url or candidate_url in used_urls:
             continue
         _download_image(candidate_url, output_path)
         used_urls.add(candidate_url)
-        contributor = image_info.get("user", "")
-        source_url = image_info.get("descriptionurl", "")
         return {
             "provider": "wikimedia",
-            "credit": contributor,
-            "source_url": source_url,
+            "credit": image_info.get("user", ""),
+            "source_url": image_info.get("descriptionurl", ""),
             "remote_asset_url": candidate_url,
             "query": query,
         }
+    return None
 
+
+def _resolve_stock_image(project: VideoProject, query: str, output_path: Path, used_urls: set[str], per_page: int) -> dict | None:
+    resolver_map = {
+        "pexels": _resolve_pexels_image,
+        "pixabay": _resolve_pixabay_image,
+        "wikimedia": _resolve_wikimedia_image,
+    }
+    for provider in _provider_search_order(project):
+        result = resolver_map[provider](query, output_path, used_urls, per_page)
+        if result:
+            return result
     return None
 
 
@@ -307,15 +370,19 @@ def fetch_scene_assets(project: VideoProject, replace_existing: bool = False) ->
     scene_dir = media_dir("projects", str(project.id), "assets")
     assets: list[MediaAsset] = []
     used_urls: set[str] = set()
+    max_queries_per_scene, per_page = _query_budget()
+    min_real_target = max(1, int(getattr(settings, "STOCK_MEDIA_MIN_REAL_SCENE_TARGET", 3)))
+    real_assets_created = 0
 
     for index, scene in enumerate(project.topic.scene_plan):
         prompt = slugify_text(scene.get("text", f"scene-{index+1}"))
         output_path = Path(scene_dir / f"{index+1:02d}-{prompt}.jpg")
         stock_result = None
-        if not _scene_prefers_placeholder(scene):
-            for query in _build_scene_queries(project, scene):
+        can_try_real_image = not _scene_prefers_placeholder(scene) or real_assets_created < min_real_target
+        if can_try_real_image:
+            for query in _build_scene_queries(project, scene)[:max_queries_per_scene]:
                 try:
-                    stock_result = _resolve_stock_image(query, output_path, used_urls)
+                    stock_result = _resolve_stock_image(project, query, output_path, used_urls, per_page)
                 except requests.RequestException:
                     continue
                 if stock_result:
@@ -332,6 +399,7 @@ def fetch_scene_assets(project: VideoProject, replace_existing: bool = False) ->
                 sort_order=index,
             )
         else:
+            real_assets_created += 1
             asset = MediaAsset.objects.create(
                 project=project,
                 asset_type="image",
