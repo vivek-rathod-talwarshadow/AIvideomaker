@@ -1,5 +1,6 @@
 from pathlib import Path
 import shutil
+from types import SimpleNamespace
 
 from django.conf import settings
 from django.contrib import messages
@@ -12,6 +13,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from .enums import JobStatus, PlatformType
 from .models import EventLog, PublishJob, VideoProject
 from .services.pipeline import get_automation_state
+from .services.voiceover import generate_voice_sample, get_voice_options, get_voice_map, resolve_voice_name
 
 
 def _platform_status_cards() -> list[dict]:
@@ -101,13 +103,22 @@ def _provider_status_cards() -> list[dict]:
 
 @require_http_methods(["GET", "HEAD"])
 def dashboard(request: HttpRequest) -> HttpResponse:
+    automation_state = SimpleNamespace(
+        is_enabled=False,
+        last_cycle_at=None,
+        last_error="",
+        default_voice_name=resolve_voice_name(getattr(settings, "EDGE_TTS_VOICE", None)),
+    )
+    voice_options = get_voice_options()
     context = {
         "platform_cards": _platform_status_cards(),
         "provider_cards": _provider_status_cards(),
         "recent_projects": [],
         "recent_jobs": [],
         "recent_logs": [],
-        "automation_state": None,
+        "automation_state": automation_state,
+        "voice_options": voice_options,
+        "selected_voice_name": resolve_voice_name(automation_state.default_voice_name),
         "stats": {
             "total_projects": 0,
             "queued_projects": 0,
@@ -177,6 +188,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                     "disk_clean_projects": sum(1 for project in recent_projects if not project.video_exists),
                 },
                 "automation_state": automation_state,
+                "selected_voice_name": resolve_voice_name(automation_state.default_voice_name),
             }
         )
     except (OperationalError, ProgrammingError):
@@ -336,6 +348,17 @@ def start_new_project(request: HttpRequest) -> HttpResponse:
 
 
 @require_POST
+def set_default_voice(request: HttpRequest) -> HttpResponse:
+    voice_name = resolve_voice_name(request.POST.get("voice_name"))
+    voice_map = get_voice_map()
+    state = get_automation_state()
+    state.default_voice_name = voice_name
+    state.save(update_fields=["default_voice_name", "updated_at"])
+    messages.success(request, f"Default voice set to {voice_map[voice_name]['label']}.")
+    return redirect("dashboard")
+
+
+@require_POST
 def start_generate(request: HttpRequest) -> HttpResponse:
     from .services.pipeline import start_generation_async
 
@@ -371,3 +394,15 @@ def preview_video(request: HttpRequest, project_id: int) -> HttpResponse:
     if not path.exists():
         raise Http404("Preview file not found.")
     return FileResponse(path.open("rb"), content_type="video/mp4")
+
+
+@require_GET
+def preview_voice_sample(request: HttpRequest) -> HttpResponse:
+    voice_name = resolve_voice_name(request.GET.get("voice"))
+    try:
+        path = generate_voice_sample(voice_name)
+    except Exception as exc:
+        return JsonResponse({"detail": str(exc)}, status=500)
+    if not path.exists():
+        raise Http404("Voice sample not found.")
+    return FileResponse(path.open("rb"), content_type="audio/mpeg")

@@ -91,6 +91,59 @@
             margin-top: 14px;
         }
 
+        .voice-panel {
+            margin-top: 18px;
+            padding: 16px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: linear-gradient(180deg, rgba(255, 247, 238, 0.95), rgba(255, 240, 226, 0.82));
+        }
+
+        .voice-panel h4 {
+            margin: 0;
+            font-size: 1rem;
+        }
+
+        .voice-panel p {
+            margin: 6px 0 0;
+        }
+
+        .voice-controls {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto auto;
+            gap: 12px;
+            align-items: end;
+            margin-top: 14px;
+        }
+
+        .field label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            color: var(--muted);
+        }
+
+        .field select {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: 14px;
+            padding: 12px 14px;
+            font: inherit;
+            color: var(--ink);
+            background: rgba(255, 255, 255, 0.94);
+        }
+
+        .voice-meta {
+            margin-top: 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+
         .btn {
             appearance: none;
             border: none;
@@ -313,6 +366,10 @@
             .table-grid {
                 grid-template-columns: 1fr;
             }
+
+            .voice-controls {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
 </head>
@@ -356,6 +413,35 @@
                     {% else %}
                         <div id="automation-error" class="muted" style="margin-top: 10px;">No automation errors.</div>
                     {% endif %}
+                    <div class="voice-panel">
+                        <div class="muted">Narration voice</div>
+                        <h4>Choose the default deep male voice for new videos</h4>
+                        <p class="muted">Play a sample, then save your choice. New projects will use this voice automatically.</p>
+                        <form method="post" action="{% url 'set-default-voice' %}">
+                            {% csrf_token %}
+                            <div class="voice-controls">
+                                <div class="field">
+                                    <label for="voice-select">Voice</label>
+                                    <select id="voice-select" name="voice_name">
+                                        {% for voice in voice_options %}
+                                            <option value="{{ voice.value }}" data-label="{{ voice.label }}" data-description="{{ voice.description }}" {% if selected_voice_name == voice.value %}selected{% endif %}>
+                                                {{ voice.label }} - {{ voice.description }}
+                                            </option>
+                                        {% endfor %}
+                                    </select>
+                                </div>
+                                <button class="btn btn-secondary" type="button" id="play-voice-sample">Play Sample</button>
+                                <button class="btn btn-primary" type="submit">Save Default Voice</button>
+                            </div>
+                            <div class="voice-meta">
+                                <span class="badge badge-warn" id="voice-current-badge">Current default</span>
+                                <span class="muted" id="voice-description">
+                                    {% for voice in voice_options %}{% if selected_voice_name == voice.value %}{{ voice.description }}{% endif %}{% endfor %}
+                                </span>
+                                <audio id="voice-sample-player" preload="none" controls style="max-width: 100%;"></audio>
+                            </div>
+                        </form>
+                    </div>
                     <div class="actions">
                         <form method="post" action="{% url 'automation-start' %}">
                             {% csrf_token %}
@@ -645,6 +731,10 @@
             idle: 30000,
             hidden: 120000,
         };
+        const voiceSelect = document.getElementById("voice-select");
+        const voiceDescription = document.getElementById("voice-description");
+        const voiceSamplePlayer = document.getElementById("voice-sample-player");
+        const playVoiceSampleButton = document.getElementById("play-voice-sample");
 
         const badgeTone = (status) => {
             if (["ready", "posted"].includes(status)) return "badge-ok";
@@ -675,6 +765,32 @@
             window.clearTimeout(statusPollTimer);
             statusPollTimer = window.setTimeout(refreshDashboardStatus, nextPollDelay(status));
         };
+
+        const selectedVoiceOption = () => voiceSelect?.options?.[voiceSelect.selectedIndex] || null;
+
+        const syncVoiceDescription = () => {
+            const option = selectedVoiceOption();
+            if (voiceDescription && option) {
+                voiceDescription.textContent = option.dataset.description || "";
+            }
+        };
+
+        const voiceSampleUrl = () => {
+            const option = selectedVoiceOption();
+            const voiceName = option?.value || "";
+            return `{% url 'preview-voice-sample' %}?voice=${encodeURIComponent(voiceName)}`;
+        };
+
+        async function playVoiceSample() {
+            if (!voiceSamplePlayer || !voiceSelect) return;
+            syncVoiceDescription();
+            voiceSamplePlayer.src = voiceSampleUrl();
+            try {
+                await voiceSamplePlayer.play();
+            } catch (error) {
+                console.error("Voice sample playback failed", error);
+            }
+        }
 
         async function refreshDashboardStatus() {
             try {
@@ -826,6 +942,13 @@
             }
         }
 
+        if (voiceSelect) {
+            voiceSelect.addEventListener("change", syncVoiceDescription);
+            syncVoiceDescription();
+        }
+        if (playVoiceSampleButton) {
+            playVoiceSampleButton.addEventListener("click", playVoiceSample);
+        }
         document.addEventListener("visibilitychange", () => scheduleDashboardRefresh("idle"));
         scheduleDashboardRefresh("idle");
     </script>

@@ -153,7 +153,7 @@ ENABLE_YOUTUBE_UPLOAD = os.getenv("ENABLE_YOUTUBE_UPLOAD", "True").lower() == "t
 ENABLE_INSTAGRAM_UPLOAD = os.getenv("ENABLE_INSTAGRAM_UPLOAD", "False").lower() == "true"
 ENABLE_PINTEREST_UPLOAD = os.getenv("ENABLE_PINTEREST_UPLOAD", "False").lower() == "true"
 CHANNEL_BRAND_NAME = os.getenv("CHANNEL_BRAND_NAME", "DarkBrainScroll")
-EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-US-AnaNeural")
+EDGE_TTS_VOICE = os.getenv("EDGE_TTS_VOICE", "en-US-ChristopherNeural")
 EDGE_TTS_MAX_RETRIES = int(os.getenv("EDGE_TTS_MAX_RETRIES", "3"))
 EDGE_TTS_RETRY_DELAY_SECONDS = float(os.getenv("EDGE_TTS_RETRY_DELAY_SECONDS", "2"))
 AUTOMATION_RETRY_LIMIT = int(os.getenv("AUTOMATION_RETRY_LIMIT", "3"))

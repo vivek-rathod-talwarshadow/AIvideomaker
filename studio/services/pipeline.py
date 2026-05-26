@@ -18,7 +18,7 @@ from .subtitles import generate_basic_srt
 from .topic_generator import build_ai_topic, estimate_duration_seconds
 from .uploaders import get_uploader
 from .utils import file_sha1, safe_rmtree, safe_unlink, stable_hash
-from .voiceover import generate_voiceover
+from .voiceover import DEFAULT_VOICE_NAME, generate_voiceover, resolve_voice_name
 
 
 AUTOMATION_NICHE_ORDER = (
@@ -207,6 +207,7 @@ def get_automation_state() -> AutomationState:
     state, _ = AutomationState.objects.get_or_create(
         key="global",
         defaults={
+            "default_voice_name": resolve_voice_name(getattr(settings, "EDGE_TTS_VOICE", DEFAULT_VOICE_NAME)),
             "is_enabled": True,
             "auto_upload": True,
             "retry_failures": True,
@@ -447,9 +448,11 @@ def create_daily_project_if_needed() -> VideoProject | None:
     topic = _build_unique_automation_topic()
     duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
     target_width, target_height = _project_video_dimensions()
+    default_voice_name = resolve_voice_name(get_automation_state().default_voice_name)
     project = VideoProject.objects.create(
         topic=topic,
         niche=topic.niche,
+        voice_name=default_voice_name,
         status=JobStatus.QUEUED,
         target_width=target_width,
         target_height=target_height,
@@ -490,9 +493,11 @@ def create_project(niche: str = "facts") -> VideoProject:
     topic = build_ai_topic(niche)
     duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
     target_width, target_height = _project_video_dimensions()
+    default_voice_name = resolve_voice_name(get_automation_state().default_voice_name)
     project = VideoProject.objects.create(
         topic=topic,
         niche=topic.niche,
+        voice_name=default_voice_name,
         status=JobStatus.QUEUED,
         target_width=target_width,
         target_height=target_height,

@@ -58,6 +58,7 @@ class ViralTopic(TimeStampedModel):
 class VideoProject(TimeStampedModel):
     topic = models.ForeignKey(ViralTopic, on_delete=models.CASCADE, related_name="projects")
     niche = models.CharField(max_length=40, choices=ContentNiche.choices)
+    voice_name = models.CharField(max_length=80, blank=True)
     status = models.CharField(max_length=20, choices=JobStatus.choices, default=JobStatus.DRAFT)
     aspect_ratio = models.CharField(max_length=20, default="9:16")
     target_width = models.PositiveIntegerField(default=1080)
@@ -121,6 +122,7 @@ class SchedulerLock(TimeStampedModel):
 
 class AutomationState(TimeStampedModel):
     key = models.CharField(max_length=80, unique=True, default="global")
+    default_voice_name = models.CharField(max_length=80, default="en-US-ChristopherNeural")
     is_enabled = models.BooleanField(default=True)
     auto_upload = models.BooleanField(default=True)
     retry_failures = models.BooleanField(default=True)
