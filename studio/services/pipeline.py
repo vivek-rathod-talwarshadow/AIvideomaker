@@ -22,22 +22,12 @@ from .voiceover import DEFAULT_VOICE_NAME, generate_voiceover, resolve_voice_nam
 
 
 AUTOMATION_NICHE_ORDER = (
-    "facts",
-    "horror",
-    "space",
-    "psychology",
     "money",
     "ai",
-    "tech",
+    "business",
+    "psychology",
+    "facts",
     "crime",
-    "mythology",
-    "survival",
-    "animals",
-    "body",
-    "celebrity",
-    "motivation",
-    "gym",
-    "quotes",
     "theory",
 )
 
@@ -565,7 +555,7 @@ def generate_project_media(project: VideoProject) -> None:
     set_project_progress(project, 15, "Preparing scene assets...")
     assets = list(project.assets.all())
     should_refresh_assets = (not assets) or any(not Path(asset.local_path).exists() for asset in assets if asset.local_path)
-    if not should_refresh_assets and getattr(settings, "USE_STOCK_MEDIA", False):
+    if not should_refresh_assets:
         should_refresh_assets = any(bool((asset.metadata or {}).get("placeholder")) for asset in assets)
     if should_refresh_assets:
         fetch_scene_assets(project, replace_existing=bool(assets))

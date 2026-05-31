@@ -122,7 +122,7 @@ def _scene_durations(project: VideoProject, scene_count: int) -> list[int]:
     while len(weights) < scene_count:
         weights.append(1)
     total_weight = sum(weights) or scene_count
-    durations = [max(3, round(total_duration * weight / total_weight)) for weight in weights]
+    durations = [max(4, round(total_duration * weight / total_weight)) for weight in weights]
     difference = total_duration - sum(durations)
     index = 0
     while difference != 0 and durations:
@@ -130,7 +130,7 @@ def _scene_durations(project: VideoProject, scene_count: int) -> list[int]:
         if difference > 0:
             durations[target] += 1
             difference -= 1
-        elif durations[target] > 3:
+        elif durations[target] > 4:
             durations[target] -= 1
             difference += 1
         index += 1

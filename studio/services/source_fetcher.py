@@ -45,6 +45,10 @@ STOPWORDS = {
     "their", "them", "they", "this", "to", "up", "was", "were", "with", "you", "your",
 }
 PLACEHOLDER_ONLY_MARKERS = {"follow ", "subscribe", "like and follow", "for more facts"}
+GENERIC_FALLBACK_IMAGE_SOURCES = (
+    "https://picsum.photos/seed/{seed}/900/1600",
+    "https://loremflickr.com/900/1600/{query_slug}",
+)
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -93,7 +97,7 @@ def _create_scene_slide(project: VideoProject, scene: dict, index: int, output_p
     draw.rounded_rectangle(body_box, radius=46, fill=(15, 23, 42, 150), outline="#FDE68A", width=4)
     draw.multiline_text((120, 430), wrapped_body, font=body_font, fill="#FFFFFF", spacing=18, align="left")
 
-    footer = f"{getattr(settings, 'CHANNEL_BRAND_NAME', 'DarkBrainScroll')}  |  AI Shorts"
+    footer = getattr(settings, "CHANNEL_BRAND_NAME", "DarkBrainScroll")
     draw.text((110, project.target_height - 180), footer, font=footer_font, fill="#E2E8F0")
 
     accent_y = project.target_height - 120
@@ -331,6 +335,27 @@ def _resolve_stock_image(project: VideoProject, query: str, output_path: Path, u
     return None
 
 
+def _resolve_generic_fallback_image(query: str, output_path: Path, used_urls: set[str]) -> dict | None:
+    query_slug = slugify_text(query or "viral-scene")
+    for template in GENERIC_FALLBACK_IMAGE_SOURCES:
+        candidate_url = template.format(seed=query_slug, query_slug=query_slug.replace("-", ","))
+        if candidate_url in used_urls:
+            continue
+        try:
+            _download_image(candidate_url, output_path)
+        except requests.RequestException:
+            continue
+        used_urls.add(candidate_url)
+        return {
+            "provider": "generic-fallback",
+            "credit": "",
+            "source_url": candidate_url,
+            "remote_asset_url": candidate_url,
+            "query": query,
+        }
+    return None
+
+
 def _clear_existing_assets(project: VideoProject) -> None:
     for asset in project.assets.all():
         if asset.local_path:
@@ -364,9 +389,6 @@ def fetch_scene_assets(project: VideoProject, replace_existing: bool = False) ->
     if project.assets.exists():
         return list(project.assets.order_by("sort_order"))
 
-    if not getattr(settings, "USE_STOCK_MEDIA", False):
-        return fetch_placeholder_assets(project)
-
     scene_dir = media_dir("projects", str(project.id), "assets")
     assets: list[MediaAsset] = []
     used_urls: set[str] = set()
@@ -387,6 +409,19 @@ def fetch_scene_assets(project: VideoProject, replace_existing: bool = False) ->
                     continue
                 if stock_result:
                     break
+            if not stock_result:
+                fallback_queries = [
+                    str(scene.get("visual_hint") or "").strip(),
+                    _topic_keyword_phrase(project),
+                    project.niche,
+                    project.topic.title,
+                ]
+                for query in fallback_queries:
+                    if not query:
+                        continue
+                    stock_result = _resolve_generic_fallback_image(query, output_path, used_urls)
+                    if stock_result:
+                        break
 
         if not stock_result:
             output_path = Path(scene_dir / f"{index+1:02d}-{prompt}.png")
