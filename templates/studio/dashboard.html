@@ -136,6 +136,23 @@
             background: rgba(255, 255, 255, 0.94);
         }
 
+        .inline-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-top: 10px;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .mode-panel {
+            margin-top: 16px;
+            padding: 14px 16px;
+            border-radius: 18px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.58);
+        }
+
         .voice-meta {
             margin-top: 10px;
             display: flex;
@@ -406,6 +423,22 @@
                             Waiting for the first automation cycle.
                         {% endif %}
                     </div>
+                    <div class="mode-panel">
+                        <form method="post" action="{% url 'set-brainrot-mode' %}">
+                            {% csrf_token %}
+                            <label class="inline-toggle">
+                                <input type="checkbox" name="brainrot_mode" value="1" {% if automation_state.brainrot_mode %}checked{% endif %} onchange="this.form.submit()">
+                                Brainrot Mode
+                            </label>
+                        </form>
+                        <div class="muted" style="margin-top: 8px;">
+                            {% if automation_state.brainrot_mode %}
+                                Brainrot mode is active globally. New projects and automation runs will create brainrot video montages only.
+                            {% else %}
+                                Regular mode is active globally. New projects and automation runs will create standard video montage projects.
+                            {% endif %}
+                        </div>
+                    </div>
                     {% if automation_state.last_error %}
                         <div id="automation-error" class="message" style="background: var(--danger-soft); color: var(--danger); border-color: rgba(152, 59, 54, 0.16);">
                             {{ automation_state.last_error|truncatechars:160 }}
@@ -453,6 +486,12 @@
                         </form>
                         <form method="post" action="{% url 'start-new-project' %}">
                             {% csrf_token %}
+                            <select name="niche" aria-label="Video niche">
+                                <option value="">Auto Pick Best Niche</option>
+                                {% for value, label in niche_options %}
+                                    <option value="{{ value }}">{{ label }}</option>
+                                {% endfor %}
+                            </select>
                             <button class="btn btn-secondary" type="submit">Create New Video</button>
                         </form>
                         <form method="post" action="{% url 'start-generate' %}">

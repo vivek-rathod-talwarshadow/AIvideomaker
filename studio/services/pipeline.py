@@ -12,23 +12,27 @@ from django.utils import timezone
 from studio.enums import JobStatus, PlatformType
 from studio.models import AutomationState, ChannelProfile, EventLog, PublishJob, SchedulerLock, VideoProject, ViralTopic
 from .logging_service import log_event
+from .music import generate_background_music
 from .renderer import render_slideshow_video
 from .source_fetcher import fetch_scene_assets
 from .subtitles import generate_basic_srt
-from .topic_generator import build_ai_topic, estimate_duration_seconds
+from .topic_generator import build_ai_topic, build_brainrot_video_topic, estimate_duration_seconds
 from .uploaders import get_uploader
 from .utils import file_sha1, safe_rmtree, safe_unlink, stable_hash
 from .voiceover import DEFAULT_VOICE_NAME, generate_voiceover, resolve_voice_name
 
 
 AUTOMATION_NICHE_ORDER = (
+    "glam",
+    "celebrity",
+    "reddit",
+    "psychology",
+    "theory",
+    "crime",
     "money",
     "ai",
     "business",
-    "psychology",
     "facts",
-    "crime",
-    "theory",
 )
 
 
@@ -50,6 +54,20 @@ def _project_video_dimensions() -> tuple[int, int]:
     width = max(360, int(getattr(settings, "DEFAULT_VIDEO_WIDTH", 720)))
     height = max(640, int(getattr(settings, "DEFAULT_VIDEO_HEIGHT", 1280)))
     return width, height
+
+
+def _project_render_mode(project: VideoProject) -> str:
+    for note in project.topic.source_notes or []:
+        if str(note).startswith("render-mode:"):
+            return str(note).split(":", 1)[1].strip().lower()
+    return str(project.caption_style.get("render_mode") or "").strip().lower()
+
+
+def _project_duration_seconds(project: VideoProject) -> int:
+    estimated = estimate_duration_seconds(project.topic.script, project.topic.scene_plan)
+    if _project_render_mode(project) == "brainrot-video":
+        return max(90, min(180, estimated + 36))
+    return estimated
 
 
 def _recent_automation_entries(limit: int = 100) -> list[dict]:
@@ -198,11 +216,24 @@ def get_automation_state() -> AutomationState:
         key="global",
         defaults={
             "default_voice_name": resolve_voice_name(getattr(settings, "EDGE_TTS_VOICE", DEFAULT_VOICE_NAME)),
+            "brainrot_mode": False,
             "is_enabled": True,
             "auto_upload": True,
             "retry_failures": True,
             "last_started_at": timezone.now(),
         },
+    )
+    return state
+
+
+def set_brainrot_mode(enabled: bool) -> AutomationState:
+    state = get_automation_state()
+    state.brainrot_mode = bool(enabled)
+    state.save(update_fields=["brainrot_mode", "updated_at"])
+    log_event(
+        "automation.mode_changed",
+        "Brainrot mode enabled." if enabled else "Brainrot mode disabled.",
+        payload={"brainrot_mode": bool(enabled)},
     )
     return state
 
@@ -420,6 +451,7 @@ def create_daily_project_if_needed() -> VideoProject | None:
     created_today = _automation_projects_created_today()
     if created_today >= settings.MAX_VIDEOS_PER_DAY:
         return None
+    state = get_automation_state()
     enabled_platforms = get_enabled_platforms()
     if not enabled_platforms:
         log_event(
@@ -435,50 +467,54 @@ def create_daily_project_if_needed() -> VideoProject | None:
         )
         return None
 
-    topic = _build_unique_automation_topic()
-    duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
-    target_width, target_height = _project_video_dimensions()
-    default_voice_name = resolve_voice_name(get_automation_state().default_voice_name)
-    project = VideoProject.objects.create(
-        topic=topic,
-        niche=topic.niche,
-        voice_name=default_voice_name,
-        status=JobStatus.QUEUED,
-        target_width=target_width,
-        target_height=target_height,
-        content_signature=stable_hash([topic.niche, topic.title.strip().lower(), " ".join(topic.script.lower().split())]),
-        duration_seconds=duration_seconds,
-        progress_percent=5,
-        status_message="Project created and waiting to generate.",
-        caption_style={
-            "font_size": 60,
-            "stroke": 4,
-            "highlight_color": "#F9D423",
-            "text_color": "#FFFFFF",
-            "position": "bottom-third",
-            "brand_name": settings.CHANNEL_BRAND_NAME,
-        },
-    )
-    fetch_scene_assets(project)
-    for order_index, platform in enumerate(enabled_platforms, start=1):
-        channel = get_or_create_default_channel(platform)
-        PublishJob.objects.create(
-            project=project,
-            channel=channel,
-            scheduled_for=timezone.now() + timedelta(minutes=(order_index - 1) * 20),
-            order_index=order_index,
+    if state.brainrot_mode:
+        project = create_brainrot_project(automation=True)
+    else:
+        topic = _build_unique_automation_topic()
+        duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
+        target_width, target_height = _project_video_dimensions()
+        default_voice_name = resolve_voice_name(state.default_voice_name)
+        project = VideoProject.objects.create(
+            topic=topic,
+            niche=topic.niche,
+            voice_name=default_voice_name,
+            status=JobStatus.QUEUED,
+            target_width=target_width,
+            target_height=target_height,
+            content_signature=stable_hash([topic.niche, topic.title.strip().lower(), " ".join(topic.script.lower().split())]),
+            duration_seconds=duration_seconds,
+            progress_percent=5,
+            status_message="Project created and waiting to generate.",
+            caption_style={
+                "font_size": 60,
+                "stroke": 4,
+                "highlight_color": "#F9D423",
+                "text_color": "#FFFFFF",
+                "position": "bottom-third",
+                "brand_name": settings.CHANNEL_BRAND_NAME,
+                "render_mode": "video-montage",
+            },
         )
-    log_event("automation.project_queued", "Project queued for automatic generation and upload.", project=project)
-    log_event(
-        "project.created",
-        "Daily project generated.",
-        project=project,
-        payload={"title": project.topic.title, "niche": project.niche, "automation": True},
-    )
+        fetch_scene_assets(project)
+        for order_index, platform in enumerate(enabled_platforms, start=1):
+            channel = get_or_create_default_channel(platform)
+            PublishJob.objects.create(
+                project=project,
+                channel=channel,
+                scheduled_for=timezone.now() + timedelta(minutes=(order_index - 1) * 20),
+                order_index=order_index,
+            )
+        log_event("automation.project_queued", "Project queued for automatic generation and upload.", project=project)
+        log_event(
+            "project.created",
+            "Daily project generated.",
+            project=project,
+            payload={"title": project.topic.title, "niche": project.niche, "automation": True},
+        )
     return project
 
 
-def create_project(niche: str = "facts") -> VideoProject:
+def create_project(niche: str = "") -> VideoProject:
     niche = niche or _select_automation_niche()
     topic = build_ai_topic(niche)
     duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
@@ -500,6 +536,7 @@ def create_project(niche: str = "facts") -> VideoProject:
             "text_color": "#FFFFFF",
             "position": "bottom-third",
             "brand_name": settings.CHANNEL_BRAND_NAME,
+            "render_mode": "video-montage",
         },
     )
     fetch_scene_assets(project)
@@ -521,6 +558,57 @@ def create_project(niche: str = "facts") -> VideoProject:
         "Manual project generated from dashboard.",
         project=project,
         payload={"title": project.topic.title, "niche": project.niche, "automation": False},
+    )
+    return project
+
+
+def create_brainrot_project(automation: bool = False) -> VideoProject:
+    topic = build_brainrot_video_topic()
+    duration_seconds = max(90, min(180, estimate_duration_seconds(topic.script, topic.scene_plan) + 36))
+    target_width, target_height = _project_video_dimensions()
+    default_voice_name = resolve_voice_name(get_automation_state().default_voice_name)
+    project = VideoProject.objects.create(
+        topic=topic,
+        niche=topic.niche,
+        voice_name=default_voice_name,
+        status=JobStatus.QUEUED,
+        target_width=target_width,
+        target_height=target_height,
+        content_signature=stable_hash([topic.niche, topic.title.strip().lower(), " ".join(topic.script.lower().split())]),
+        duration_seconds=duration_seconds,
+        progress_percent=5,
+        status_message="Brainrot project created and waiting to generate.",
+        caption_style={
+            "font_size": 60,
+            "stroke": 4,
+            "highlight_color": "#F9D423",
+            "text_color": "#FFFFFF",
+            "position": "bottom-third",
+            "brand_name": settings.CHANNEL_BRAND_NAME,
+            "render_mode": "brainrot-video",
+        },
+    )
+    fetch_scene_assets(project)
+    enabled_platforms = get_enabled_platforms()
+    for order_index, platform in enumerate(enabled_platforms, start=1):
+        channel = get_or_create_default_channel(platform)
+        PublishJob.objects.create(
+            project=project,
+            channel=channel,
+            scheduled_for=timezone.now() + timedelta(minutes=(order_index - 1) * 20),
+            order_index=order_index,
+        )
+    if not enabled_platforms:
+        project.status = JobStatus.SKIPPED
+        project.failure_reason = "No platforms are enabled."
+        project.save(update_fields=["status", "failure_reason", "updated_at"])
+    if automation:
+        log_event("automation.project_queued", "Brainrot project queued for automatic generation and upload.", project=project)
+    log_event(
+        "project.created",
+        "Brainrot video project generated." if automation else "Brainrot video project generated from dashboard.",
+        project=project,
+        payload={"title": project.topic.title, "niche": project.niche, "automation": automation, "mode": "brainrot"},
     )
     return project
 
@@ -550,7 +638,7 @@ def ensure_publish_jobs(project: VideoProject) -> list[PublishJob]:
 def generate_project_media(project: VideoProject) -> None:
     project.status = JobStatus.GENERATING
     project.failure_reason = ""
-    project.duration_seconds = estimate_duration_seconds(project.topic.script, project.topic.scene_plan)
+    project.duration_seconds = _project_duration_seconds(project)
     project.save(update_fields=["status", "failure_reason", "duration_seconds", "updated_at"])
     set_project_progress(project, 15, "Preparing scene assets...")
     assets = list(project.assets.all())
@@ -559,13 +647,25 @@ def generate_project_media(project: VideoProject) -> None:
         should_refresh_assets = any(bool((asset.metadata or {}).get("placeholder")) for asset in assets)
     if should_refresh_assets:
         fetch_scene_assets(project, replace_existing=bool(assets))
-    set_project_progress(project, 35, "Generating voiceover...")
-    log_event("project.voiceover_started", "Generating AI voiceover.", project=project)
-    generate_voiceover(project)
-    set_project_progress(project, 55, "Building subtitles...")
-    generate_basic_srt(project)
-    set_project_progress(project, 75, "Rendering slideshow video...")
-    log_event("project.render_started", "Rendering animated video with captions.", project=project)
+    render_mode = _project_render_mode(project)
+    if render_mode == "brainrot-video":
+        set_project_progress(project, 35, "Preparing background music...")
+        generate_background_music(project)
+        project.voiceover_file = ""
+        project.subtitle_file = ""
+        project.save(update_fields=["voiceover_file", "subtitle_file", "updated_at"])
+        set_project_progress(project, 75, "Rendering brainrot montage...")
+        log_event("project.render_started", "Rendering stock-footage montage with music.", project=project)
+    else:
+        set_project_progress(project, 35, "Generating voiceover...")
+        log_event("project.voiceover_started", "Generating AI voiceover.", project=project)
+        generate_voiceover(project)
+        set_project_progress(project, 55, "Building subtitles...")
+        generate_basic_srt(project)
+        set_project_progress(project, 68, "Preparing background music...")
+        generate_background_music(project)
+        set_project_progress(project, 75, "Rendering video montage...")
+        log_event("project.render_started", "Rendering stock-footage video with captions.", project=project)
     render_slideshow_video(project, progress_callback=lambda percent, message: set_project_progress(project, percent, message))
     _ensure_output_fingerprint(project)
     set_project_progress(project, 100, "Preview ready for upload.")

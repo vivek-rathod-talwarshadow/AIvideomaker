@@ -10,7 +10,7 @@ from django.http import FileResponse, Http404, HttpRequest, HttpResponse, JsonRe
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_GET, require_http_methods, require_POST
 
-from .enums import JobStatus, PlatformType
+from .enums import ContentNiche, JobStatus, PlatformType
 from .models import EventLog, PublishJob, VideoProject
 from .services.pipeline import get_automation_state
 from .services.voiceover import generate_voice_sample, get_voice_options, get_voice_map, resolve_voice_name
@@ -118,6 +118,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "recent_logs": [],
         "automation_state": automation_state,
         "voice_options": voice_options,
+        "niche_options": ContentNiche.choices,
         "selected_voice_name": resolve_voice_name(automation_state.default_voice_name),
         "stats": {
             "total_projects": 0,
@@ -327,23 +328,65 @@ def automation_pause(request: HttpRequest) -> HttpResponse:
 
 
 @require_POST
+def set_brainrot_mode(request: HttpRequest) -> HttpResponse:
+    from .services.pipeline import set_brainrot_mode as update_brainrot_mode
+
+    enabled = str(request.POST.get("brainrot_mode") or "").strip().lower() in {"1", "true", "on", "yes"}
+    update_brainrot_mode(enabled)
+    messages.success(request, "Brainrot mode enabled globally." if enabled else "Brainrot mode disabled globally.")
+    return redirect("dashboard")
+
+
+@require_POST
 def start_new_project(request: HttpRequest) -> HttpResponse:
-    from .services.pipeline import create_project
+    from .services.pipeline import create_brainrot_project, create_project, get_automation_state, start_generation_async
     from .services.logging_service import log_event
 
+    niche = str(request.POST.get("niche") or "").strip()
+    brainrot_mode = bool(get_automation_state().brainrot_mode)
     try:
-        project = create_project()
+        if brainrot_mode:
+            project = create_brainrot_project()
+            start_generation_async(project)
+        else:
+            project = create_project(niche=niche)
     except Exception as exc:
         log_event(
             "project.create_failed",
             "Manual project creation failed from dashboard.",
             level="error",
-            payload={"error": str(exc)},
+            payload={"error": str(exc), "niche": niche, "brainrot_mode": brainrot_mode},
         )
         messages.error(request, f"Could not create a new video: {exc}")
         return redirect("dashboard")
 
-    messages.success(request, f"Created project #{project.id}: {project.topic.title}")
+    if brainrot_mode:
+        messages.success(request, f"Brainrot project #{project.id} created and generation started: {project.topic.title}")
+    else:
+        messages.success(request, f"Created project #{project.id}: {project.topic.title}")
+    return redirect("dashboard")
+
+
+@require_POST
+def start_brainrot_project(request: HttpRequest) -> HttpResponse:
+    from .services.pipeline import create_brainrot_project, set_brainrot_mode as update_brainrot_mode, start_generation_async
+    from .services.logging_service import log_event
+
+    try:
+        update_brainrot_mode(True)
+        project = create_brainrot_project()
+        start_generation_async(project)
+    except Exception as exc:
+        log_event(
+            "project.create_failed",
+            "Brainrot video creation failed from dashboard.",
+            level="error",
+            payload={"error": str(exc), "mode": "brainrot"},
+        )
+        messages.error(request, f"Could not start the brainrot video flow: {exc}")
+        return redirect("dashboard")
+
+    messages.success(request, f"Brainrot project #{project.id} created and generation started: {project.topic.title}")
     return redirect("dashboard")
 
 

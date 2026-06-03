@@ -35,12 +35,27 @@ def generate_basic_srt(project: VideoProject) -> str:
     if not scenes:
         scenes = [{"text": line.strip(), "duration": 3} for line in project.topic.script.splitlines() if line.strip()]
 
+    raw_durations = [max(2, int(scene.get("duration", 3) or 3)) for scene in scenes]
+    total_raw_duration = sum(raw_durations) or 1
+    total_target_duration = max(project.duration_seconds, total_raw_duration)
+    scaled_durations = [max(2, round(total_target_duration * (duration / total_raw_duration))) for duration in raw_durations]
+    difference = total_target_duration - sum(scaled_durations)
+    index = 0
+    while difference != 0 and scaled_durations:
+        target = index % len(scaled_durations)
+        if difference > 0:
+            scaled_durations[target] += 1
+            difference -= 1
+        elif scaled_durations[target] > 2:
+            scaled_durations[target] -= 1
+            difference += 1
+        index += 1
+
     cursor = 0.0
     chunks = []
     subtitle_index = 1
-    for scene in scenes:
+    for scene, scene_duration in zip(scenes, scaled_durations):
         scene_text = (scene.get("text") or "").strip()
-        scene_duration = max(2, int(scene.get("duration", 3) or 3))
         caption_parts = _caption_chunks(scene_text)
         if not caption_parts:
             continue

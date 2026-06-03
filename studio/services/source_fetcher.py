@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pathlib import Path
+import hashlib
+import shutil
 import textwrap
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
@@ -26,17 +28,26 @@ NICHE_QUERY_HINTS = {
     "money": ["money finance", "stock market", "saving cash", "wallet closeup"],
     "motivation": ["athlete training", "sunrise running", "focus work", "success mindset"],
     "reddit": ["person reading phone", "night room", "anonymous story", "dramatic portrait"],
+    "psychology": ["dramatic portrait", "couple tension", "texting phone", "social interaction"],
+    "celebrity": ["red carpet event", "paparazzi crowd", "stage performance", "fashion portrait"],
+    "glam": ["fashion portrait", "dance pose", "cosplay photoshoot", "party lights portrait"],
+    "theory": ["mysterious silhouette", "glitch screen", "conspiracy board", "late night computer"],
+    "crime": ["detective board", "city alley night", "interrogation room", "police evidence wall"],
 }
 NICHE_PROVIDER_ORDER = {
     "animals": ("pexels", "pixabay", "wikimedia"),
     "motivation": ("pexels", "pixabay", "wikimedia"),
-    "celebrity": ("wikimedia", "pexels", "pixabay"),
+    "glam": ("pexels", "pixabay", "wikimedia"),
+    "celebrity": ("pexels", "wikimedia", "pixabay"),
     "crime": ("wikimedia", "pexels", "pixabay"),
     "history": ("wikimedia", "pexels", "pixabay"),
     "mythology": ("wikimedia", "pexels", "pixabay"),
     "space": ("wikimedia", "pexels", "pixabay"),
     "body": ("wikimedia", "pexels", "pixabay"),
     "facts": ("wikimedia", "pexels", "pixabay"),
+    "reddit": ("pexels", "pixabay", "wikimedia"),
+    "psychology": ("pexels", "pixabay", "wikimedia"),
+    "theory": ("pexels", "pixabay", "wikimedia"),
 }
 DEFAULT_PROVIDER_ORDER = ("pexels", "pixabay", "wikimedia")
 STOPWORDS = {
@@ -49,6 +60,49 @@ GENERIC_FALLBACK_IMAGE_SOURCES = (
     "https://picsum.photos/seed/{seed}/900/1600",
     "https://loremflickr.com/900/1600/{query_slug}",
 )
+BRAINROT_VIDEO_QUERY_HINTS = [
+    "fashion model walking city",
+    "attractive woman walking city street style",
+    "glamorous woman luxury hotel lobby",
+    "beach lifestyle woman slow motion",
+    "travel influencer woman city aesthetic",
+    "female fitness gym workout portrait",
+    "yoga wellness woman sunrise",
+    "beauty skincare woman mirror routine",
+    "couple vacation luxury lifestyle",
+    "female entrepreneur office lifestyle",
+    "summer vacation poolside woman",
+    "cinematic slow motion woman walking",
+    "festival dancing woman lifestyle",
+    "luxury car woman lifestyle",
+]
+GENERIC_FALLBACK_VIDEO_SOURCES = (
+    "https://samplelib.com/mp4/sample-5s.mp4",
+    "https://samplelib.com/mp4/sample-10s.mp4",
+    "https://samplelib.com/mp4/sample-15s.mp4",
+    "https://samplelib.com/mp4/sample-20s.mp4",
+    "https://samplelib.com/mp4/sample-30s.mp4",
+)
+REGULAR_VIDEO_QUERY_HINTS = {
+    "facts": ["science laboratory footage", "space documentary footage", "microscope research footage", "brain scan footage"],
+    "tech": ["ai interface footage", "computer code screen footage", "robotics lab footage", "technology office footage"],
+    "money": ["luxury city lifestyle footage", "stock market screen footage", "cash counting footage", "business office footage"],
+    "motivation": ["athlete training footage", "sunrise running footage", "focus work footage", "success office footage"],
+    "reddit": ["person texting phone footage", "dramatic hallway footage", "couple argument silhouette footage", "late night room footage"],
+    "psychology": ["social interaction footage", "couple tension footage", "woman thinking portrait footage", "texting behavior footage"],
+    "celebrity": ["red carpet footage", "stage performance footage", "paparazzi crowd footage", "fashion event footage"],
+    "glam": BRAINROT_VIDEO_QUERY_HINTS,
+    "theory": ["mysterious silhouette footage", "glitch screen footage", "late night computer footage", "dark city night footage"],
+    "crime": ["detective board footage", "city alley night footage", "police evidence wall footage", "interrogation room footage"],
+}
+SAFE_BRAINROT_TERM_MAP = {
+    "sexy": "glamorous adult woman fashion",
+    "hot girl": "fashion model woman lifestyle",
+    "cute girl": "stylish young adult woman lifestyle",
+    "attractive women": "stylish women street fashion",
+    "girl": "adult woman lifestyle",
+    "girlfriend": "couple lifestyle woman",
+}
 
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -187,8 +241,25 @@ def _download_image(url: str, output_path: Path) -> bool:
     return True
 
 
+def _download_binary(url: str, output_path: Path) -> bool:
+    response = requests.get(url, timeout=60, headers={"User-Agent": USER_AGENT}, stream=True)
+    response.raise_for_status()
+    with output_path.open("wb") as handle:
+        for chunk in response.iter_content(chunk_size=1024 * 1024):
+            if chunk:
+                handle.write(chunk)
+    return output_path.exists() and output_path.stat().st_size > 0
+
+
+def _configured_token(value: str) -> str:
+    token = str(value or "").strip()
+    if not token or token.startswith("<") or token.lower() in {"secret", "your_api_key_here", "changeme"}:
+        return ""
+    return token
+
+
 def _pexels_candidates(query: str, per_page: int = 6) -> list[dict]:
-    token = getattr(settings, "PEXELS_API_KEY", "")
+    token = _configured_token(getattr(settings, "PEXELS_API_KEY", ""))
     if not token:
         return []
     response = requests.get(
@@ -202,7 +273,7 @@ def _pexels_candidates(query: str, per_page: int = 6) -> list[dict]:
 
 
 def _pixabay_candidates(query: str, per_page: int = 6) -> list[dict]:
-    token = getattr(settings, "PIXABAY_API_KEY", "")
+    token = _configured_token(getattr(settings, "PIXABAY_API_KEY", ""))
     if not token:
         return []
     response = requests.get(
@@ -356,6 +427,329 @@ def _resolve_generic_fallback_image(query: str, output_path: Path, used_urls: se
     return None
 
 
+def _project_render_mode(project: VideoProject) -> str:
+    for note in project.topic.source_notes or []:
+        if str(note).startswith("render-mode:"):
+            return str(note).split(":", 1)[1].strip().lower()
+    return ""
+
+
+def _is_brainrot_video_project(project: VideoProject) -> bool:
+    return _project_render_mode(project) == "brainrot-video"
+
+
+def _video_search_terms(project: VideoProject, limit: int = 8) -> list[str]:
+    terms: list[str] = []
+    for note in project.topic.source_notes or []:
+        if not str(note).startswith("video-search:"):
+            continue
+        value = str(note).split(":", 1)[1].strip()
+        if value and value.lower() not in {item.lower() for item in terms}:
+            terms.append(value)
+        if len(terms) >= limit:
+            break
+    return terms
+
+
+def _build_brainrot_scene_queries(project: VideoProject, scene: dict) -> list[str]:
+    visual_hint = str(scene.get("visual_hint") or "").strip()
+    keyword_phrase = _scene_keyword_phrase(str(scene.get("text") or ""), max_words=8)
+    normalized_terms = [visual_hint, keyword_phrase, *_video_search_terms(project)]
+    safe_terms: list[str] = []
+    for term in normalized_terms:
+        safe_term = term
+        for source, target in SAFE_BRAINROT_TERM_MAP.items():
+            safe_term = safe_term.replace(source, target)
+        safe_term = " ".join(safe_term.split()).strip()
+        if safe_term:
+            safe_terms.append(safe_term)
+    candidates = [*safe_terms, *BRAINROT_VIDEO_QUERY_HINTS]
+    queries: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        normalized = " ".join(item.split()).strip()
+        if normalized and normalized.lower() not in seen:
+            seen.add(normalized.lower())
+            queries.append(normalized)
+    ordered = sorted(
+        queries,
+        key=lambda item: hashlib.sha1(f"{project.id}|{scene.get('text', '')}|{item}".encode("utf-8")).hexdigest(),
+    )
+    return ordered
+
+
+def _build_regular_video_scene_queries(project: VideoProject, scene: dict) -> list[str]:
+    visual_hint = str(scene.get("visual_hint") or "").strip()
+    scene_text = str(scene.get("text") or "").strip()
+    keyword_phrase = _scene_keyword_phrase(scene_text, max_words=8)
+    candidates = [
+        visual_hint,
+        f"{visual_hint} footage" if visual_hint else "",
+        f"{visual_hint} cinematic video" if visual_hint else "",
+        keyword_phrase,
+        f"{keyword_phrase} footage" if keyword_phrase else "",
+        f"{project.niche} {keyword_phrase} footage" if keyword_phrase else "",
+        f"{project.topic.title} documentary footage" if len(project.topic.title.split()) <= 8 else "",
+        *REGULAR_VIDEO_QUERY_HINTS.get(project.niche, []),
+        "vertical stock video",
+        "documentary footage",
+    ]
+    queries: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        normalized = " ".join(item.split()).strip()
+        if normalized and normalized.lower() not in seen:
+            seen.add(normalized.lower())
+            queries.append(normalized)
+    return queries
+
+
+def _pexels_video_candidates(query: str, per_page: int = 6) -> list[dict]:
+    token = _configured_token(getattr(settings, "PEXELS_API_KEY", ""))
+    if not token:
+        return []
+    query_variants = [
+        {"query": query, "per_page": per_page, "orientation": "portrait", "size": "medium"},
+        {"query": query, "per_page": per_page, "orientation": "portrait"},
+        {"query": query, "per_page": per_page},
+    ]
+    for params in query_variants:
+        response = requests.get(
+            "https://api.pexels.com/v1/videos/search",
+            headers={"Authorization": token, "User-Agent": USER_AGENT},
+            params=params,
+            timeout=30,
+        )
+        if response.status_code == 401:
+            return []
+        response.raise_for_status()
+        videos = response.json().get("videos", [])
+        if videos:
+            return videos
+    return []
+
+
+def _pixabay_video_candidates(query: str, per_page: int = 6) -> list[dict]:
+    token = _configured_token(getattr(settings, "PIXABAY_API_KEY", ""))
+    if not token:
+        return []
+    query_variants = [
+        {
+            "key": token,
+            "q": query,
+            "video_type": "all",
+            "per_page": per_page,
+            "safesearch": "true",
+            "category": "people",
+        },
+        {
+            "key": token,
+            "q": query,
+            "video_type": "all",
+            "per_page": per_page,
+            "safesearch": "true",
+        },
+    ]
+    for params in query_variants:
+        response = requests.get(
+            "https://pixabay.com/api/videos/",
+            params=params,
+            headers={"User-Agent": USER_AGENT},
+            timeout=30,
+        )
+        if response.status_code in {400, 401, 403}:
+            continue
+        response.raise_for_status()
+        hits = response.json().get("hits", [])
+        if hits:
+            return hits
+    return []
+
+
+def _pick_pexels_video_file(video: dict) -> dict | None:
+    files = list(video.get("video_files") or [])
+    portrait_files = [
+        item for item in files
+        if int(item.get("height") or 0) >= int(item.get("width") or 0)
+    ]
+    ranked = portrait_files or files
+    ranked.sort(key=lambda item: (abs((item.get("height") or 0) - 1280), item.get("width") or 0))
+    return ranked[0] if ranked else None
+
+
+def _pick_pixabay_video_file(video: dict) -> dict | None:
+    variants = video.get("videos") or {}
+    candidates = [variants.get("medium"), variants.get("small"), variants.get("tiny"), variants.get("large")]
+    for item in candidates:
+        if item and item.get("url"):
+            return item
+    return None
+
+
+def _resolve_pexels_video(query: str, output_path: Path, used_urls: set[str], per_page: int) -> dict | None:
+    try:
+        videos = _pexels_video_candidates(query, per_page=per_page)
+    except requests.RequestException:
+        return None
+    for video in videos:
+        file_info = _pick_pexels_video_file(video)
+        candidate_url = file_info.get("link") if file_info else ""
+        if not candidate_url or candidate_url in used_urls:
+            continue
+        _download_binary(candidate_url, output_path)
+        used_urls.add(candidate_url)
+        return {
+            "provider": "pexels",
+            "credit": video.get("user", {}).get("name", ""),
+            "source_url": video.get("url", ""),
+            "remote_asset_url": candidate_url,
+            "query": query,
+        }
+    return None
+
+
+def _resolve_pixabay_video(query: str, output_path: Path, used_urls: set[str], per_page: int) -> dict | None:
+    try:
+        videos = _pixabay_video_candidates(query, per_page=per_page)
+    except requests.RequestException:
+        return None
+    for video in videos:
+        file_info = _pick_pixabay_video_file(video)
+        candidate_url = file_info.get("url") if file_info else ""
+        if not candidate_url or candidate_url in used_urls:
+            continue
+        _download_binary(candidate_url, output_path)
+        used_urls.add(candidate_url)
+        return {
+            "provider": "pixabay",
+            "credit": video.get("user", ""),
+            "source_url": video.get("pageURL", ""),
+            "remote_asset_url": candidate_url,
+            "query": query,
+        }
+    return None
+
+
+def _resolve_stock_video(query: str, output_path: Path, used_urls: set[str], per_page: int) -> dict | None:
+    resolver_map = {
+        "pexels": _resolve_pexels_video,
+        "pixabay": _resolve_pixabay_video,
+    }
+    for provider in ("pexels", "pixabay"):
+        resolver = resolver_map.get(provider)
+        if not resolver:
+            continue
+        result = resolver(query, output_path, used_urls, per_page)
+        if result:
+            return result
+    return None
+
+
+def _resolve_generic_fallback_video(output_path: Path, used_urls: set[str], seed: str) -> dict | None:
+    ordered_sources = sorted(
+        GENERIC_FALLBACK_VIDEO_SOURCES,
+        key=lambda item: hashlib.sha1(f"{seed}|{item}".encode("utf-8")).hexdigest(),
+    )
+    for candidate_url in ordered_sources:
+        if candidate_url in used_urls:
+            continue
+        try:
+            _download_binary(candidate_url, output_path)
+        except requests.RequestException:
+            continue
+        used_urls.add(candidate_url)
+        return {
+            "provider": "generic-fallback-video",
+            "credit": "samplelib.com",
+            "source_url": "https://samplelib.com/sample-mp4.html",
+            "remote_asset_url": candidate_url,
+            "query": seed,
+        }
+    return None
+
+
+def _duplicate_existing_video_asset(source_asset_path: str, output_path: Path, query: str) -> dict | None:
+    source_path = Path(source_asset_path)
+    if not source_path.exists():
+        return None
+    shutil.copyfile(source_path, output_path)
+    return {
+        "provider": "project-video-reuse",
+        "credit": "",
+        "source_url": "",
+        "remote_asset_url": source_path.as_posix(),
+        "query": query,
+    }
+
+
+def fetch_video_scene_assets(project: VideoProject, replace_existing: bool = False) -> list[MediaAsset]:
+    if replace_existing:
+        _clear_existing_assets(project)
+
+    existing_assets = project.assets.filter(asset_type="video")
+    if existing_assets.exists():
+        return list(existing_assets.order_by("sort_order"))
+
+    scene_dir = media_dir("projects", str(project.id), "assets")
+    assets: list[MediaAsset] = []
+    downloaded_asset_paths: list[str] = []
+    used_urls: set[str] = set()
+    max_queries_per_scene, per_page = _query_budget()
+    is_brainrot = _is_brainrot_video_project(project)
+
+    for index, scene in enumerate(project.topic.scene_plan):
+        prompt = slugify_text(scene.get("text", f"scene-{index+1}"))
+        output_path = Path(scene_dir / f"{index+1:02d}-{prompt}.mp4")
+        stock_result = None
+        query_builder = _build_brainrot_scene_queries if is_brainrot else _build_regular_video_scene_queries
+        query_limit = max(max_queries_per_scene + (4 if is_brainrot else 2), 5)
+        for query in query_builder(project, scene)[:query_limit]:
+            try:
+                stock_result = _resolve_stock_video(query, output_path, used_urls, per_page)
+            except requests.RequestException:
+                continue
+            if stock_result:
+                break
+        if not stock_result:
+            broad_queries = BRAINROT_VIDEO_QUERY_HINTS if is_brainrot else REGULAR_VIDEO_QUERY_HINTS.get(project.niche, [])
+            for query in broad_queries:
+                try:
+                    stock_result = _resolve_stock_video(query, output_path, used_urls, per_page)
+                except requests.RequestException:
+                    continue
+                if stock_result:
+                    break
+        if not stock_result:
+            if is_brainrot and downloaded_asset_paths:
+                fallback_seed = str(scene.get("visual_hint") or scene.get("text") or prompt)
+                stock_result = _duplicate_existing_video_asset(downloaded_asset_paths[index % len(downloaded_asset_paths)], output_path, fallback_seed)
+            else:
+                fallback_seed = str(scene.get("visual_hint") or scene.get("text") or prompt)
+                stock_result = _resolve_generic_fallback_video(output_path, used_urls, fallback_seed)
+        if not stock_result:
+            raise RuntimeError(f"Could not find stock video footage for scene {index + 1}.")
+
+        asset = MediaAsset.objects.create(
+            project=project,
+            asset_type="video",
+            local_path=str(output_path),
+            source_url=stock_result["source_url"],
+            credit=stock_result["credit"],
+            metadata={
+                "placeholder": False,
+                "provider": stock_result["provider"],
+                "remote_asset_url": stock_result["remote_asset_url"],
+                "query": stock_result["query"],
+                "scene": scene,
+            },
+            sort_order=index,
+        )
+        assets.append(asset)
+        downloaded_asset_paths.append(str(output_path))
+
+    return assets
+
+
 def _clear_existing_assets(project: VideoProject) -> None:
     for asset in project.assets.all():
         if asset.local_path:
@@ -383,73 +777,4 @@ def fetch_placeholder_assets(project: VideoProject) -> list[MediaAsset]:
 
 
 def fetch_scene_assets(project: VideoProject, replace_existing: bool = False) -> list[MediaAsset]:
-    if replace_existing:
-        _clear_existing_assets(project)
-
-    if project.assets.exists():
-        return list(project.assets.order_by("sort_order"))
-
-    scene_dir = media_dir("projects", str(project.id), "assets")
-    assets: list[MediaAsset] = []
-    used_urls: set[str] = set()
-    max_queries_per_scene, per_page = _query_budget()
-    min_real_target = max(1, int(getattr(settings, "STOCK_MEDIA_MIN_REAL_SCENE_TARGET", 3)))
-    real_assets_created = 0
-
-    for index, scene in enumerate(project.topic.scene_plan):
-        prompt = slugify_text(scene.get("text", f"scene-{index+1}"))
-        output_path = Path(scene_dir / f"{index+1:02d}-{prompt}.jpg")
-        stock_result = None
-        can_try_real_image = not _scene_prefers_placeholder(scene) or real_assets_created < min_real_target
-        if can_try_real_image:
-            for query in _build_scene_queries(project, scene)[:max_queries_per_scene]:
-                try:
-                    stock_result = _resolve_stock_image(project, query, output_path, used_urls, per_page)
-                except requests.RequestException:
-                    continue
-                if stock_result:
-                    break
-            if not stock_result:
-                fallback_queries = [
-                    str(scene.get("visual_hint") or "").strip(),
-                    _topic_keyword_phrase(project),
-                    project.niche,
-                    project.topic.title,
-                ]
-                for query in fallback_queries:
-                    if not query:
-                        continue
-                    stock_result = _resolve_generic_fallback_image(query, output_path, used_urls)
-                    if stock_result:
-                        break
-
-        if not stock_result:
-            output_path = Path(scene_dir / f"{index+1:02d}-{prompt}.png")
-            _create_scene_slide(project, scene, index, output_path)
-            asset = MediaAsset.objects.create(
-                project=project,
-                asset_type="image",
-                local_path=str(output_path),
-                metadata={"placeholder": True, "query": prompt, "scene": scene},
-                sort_order=index,
-            )
-        else:
-            real_assets_created += 1
-            asset = MediaAsset.objects.create(
-                project=project,
-                asset_type="image",
-                local_path=str(output_path),
-                source_url=stock_result["source_url"],
-                credit=stock_result["credit"],
-                metadata={
-                    "placeholder": False,
-                    "provider": stock_result["provider"],
-                    "remote_asset_url": stock_result["remote_asset_url"],
-                    "query": stock_result["query"],
-                    "scene": scene,
-                },
-                sort_order=index,
-            )
-        assets.append(asset)
-
-    return assets
+    return fetch_video_scene_assets(project, replace_existing=replace_existing)

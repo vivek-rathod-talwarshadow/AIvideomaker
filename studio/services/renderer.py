@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from math import ceil
 from pathlib import Path
+import hashlib
 import shutil
 import subprocess
 from typing import Callable
@@ -115,7 +116,7 @@ def _escape_subtitle_path(path: str) -> str:
 def _scene_durations(project: VideoProject, scene_count: int) -> list[int]:
     if scene_count <= 0:
         return []
-    audio_duration = _ffprobe_duration(project.voiceover_file)
+    audio_duration = _ffprobe_duration(project.voiceover_file) if project.voiceover_file else 0.0
     total_duration = max(project.duration_seconds, ceil(audio_duration))
     scene_plan = list(project.topic.scene_plan or [])
     weights = [max(1, int(scene.get("duration", 0) or 0)) for scene in scene_plan[:scene_count]]
@@ -146,6 +147,10 @@ def _render_scene_clip(
     clip_path: Path,
     duration: int,
 ) -> None:
+    if asset.asset_type == "video":
+        _render_video_scene_clip(project, ffmpeg_path, asset, clip_path, duration)
+        return
+
     font_arg = _drawtext_font_arg()
     brand_name = _escape_filter_text(project.caption_style.get("brand_name") or getattr(settings, "CHANNEL_BRAND_NAME", "DarkBrainScroll"))
 
@@ -221,6 +226,55 @@ def _render_scene_clip(
             raise RuntimeError(f"ffmpeg scene render failed for {asset.local_path}: {stderr or exc}") from exc
 
 
+def _video_start_offset(asset_path: str, duration: int) -> float:
+    source_duration = _ffprobe_duration(asset_path)
+    if source_duration <= duration + 0.5:
+        return 0.0
+    digest = hashlib.sha1(f"{asset_path}|{duration}".encode("utf-8")).hexdigest()
+    seed = int(digest[:8], 16)
+    max_offset = max(source_duration - duration - 0.25, 0.0)
+    return round((seed / 0xFFFFFFFF) * max_offset, 3)
+
+
+def _render_video_scene_clip(
+    project: VideoProject,
+    ffmpeg_path: str,
+    asset,
+    clip_path: Path,
+    duration: int,
+) -> None:
+    start_offset = _video_start_offset(asset.local_path, duration)
+    vf_parts = [
+        f"scale={project.target_width}:{project.target_height}:force_original_aspect_ratio=increase",
+        f"crop={project.target_width}:{project.target_height}",
+        f"fps={RENDER_FPS}",
+        "eq=saturation=1.08:contrast=1.04:brightness=0.02",
+        "format=yuv420p",
+    ]
+    command = [
+        ffmpeg_path,
+        "-y",
+        "-stream_loop",
+        "-1",
+        "-i",
+        asset.local_path,
+        "-ss",
+        str(start_offset),
+        "-t",
+        str(duration),
+        "-an",
+        "-vf",
+        ",".join(vf_parts),
+        *VIDEO_ONLY_ARGS,
+        str(clip_path),
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        raise RuntimeError(f"ffmpeg video scene render failed for {asset.local_path}: {stderr or exc}") from exc
+
+
 def render_slideshow_video(
     project: VideoProject,
     progress_callback: Callable[[int, str], None] | None = None,
@@ -237,11 +291,11 @@ def render_slideshow_video(
             "ffmpeg is not installed or not available on PATH. Install ffmpeg or set FFMPEG_BINARY to its full path."
         )
 
-    assets = list(project.assets.filter(asset_type="image").order_by("sort_order"))
+    assets = list(project.assets.filter(asset_type__in=["image", "video"]).order_by("sort_order"))
     if not assets:
-        raise RuntimeError("No image assets found for rendering.")
-    if not project.voiceover_file:
-        raise RuntimeError("Voiceover file is missing.")
+        raise RuntimeError("No scene assets found for rendering.")
+    if not project.voiceover_file and not (project.music_file and Path(project.music_file).exists()):
+        raise RuntimeError("No audio source found for rendering.")
 
     durations = _scene_durations(project, len(assets))
     clip_paths: list[Path] = []
@@ -288,27 +342,34 @@ def render_slideshow_video(
             + "':force_style='FontName=Arial,FontSize=18,PrimaryColour=&H00FFFFFF,OutlineColour=&H00000000,BackColour=&H60000000,BorderStyle=3,Outline=1,Alignment=2,MarginV=180'"
         )
 
-    final_command = [
-        ffmpeg_path,
-        "-y",
-        "-i",
-        str(assembled_path),
-        "-i",
-        project.voiceover_file,
-    ]
+    final_command = [ffmpeg_path, "-y", "-i", str(assembled_path)]
     if video_filters:
         final_command.extend(["-vf", ",".join(video_filters)])
-    final_command.extend(
-        [
-            "-map",
-            "0:v:0",
-            "-map",
-            "1:a:0",
-            *FINAL_RENDER_ARGS,
-            "-shortest",
-            str(output_path),
-        ]
-    )
+    has_voiceover = bool(project.voiceover_file and Path(project.voiceover_file).exists())
+    has_music = bool(project.music_file and Path(project.music_file).exists())
+    if has_voiceover:
+        final_command.extend(["-i", project.voiceover_file])
+    if has_music:
+        final_command.extend(["-stream_loop", "-1", "-i", project.music_file])
+
+    if has_voiceover and has_music:
+        final_command.extend(
+            [
+                "-filter_complex",
+                "[1:a]volume=1.0[voice];[2:a]volume=0.18[music];[voice][music]amix=inputs=2:duration=first[aout]",
+                "-map",
+                "0:v:0",
+                "-map",
+                "[aout]",
+            ]
+        )
+    elif has_voiceover:
+        final_command.extend(["-map", "0:v:0", "-map", "1:a:0"])
+    elif has_music:
+        final_command.extend(["-map", "0:v:0", "-map", "1:a:0"])
+    else:
+        final_command.extend(["-map", "0:v:0"])
+    final_command.extend([*FINAL_RENDER_ARGS, "-shortest", str(output_path)])
     if progress_callback:
         progress_callback(95, "Finalizing video with audio and captions...")
     try:

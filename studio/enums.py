@@ -20,6 +20,7 @@ class ContentNiche(models.TextChoices):
     ANIMALS = "animals", "Animal Facts"
     BODY = "body", "Human Body"
     CELEBRITY = "celebrity", "Celebrity Stories"
+    GLAM = "glam", "Glam & Dance"
     THEORY = "theory", "Internet Theories"
     DID_YOU_KNOW = "did-you-know", "Did You Know"
 

@@ -70,7 +70,7 @@ def build_youtube_service():
 
 
 def build_youtube_metadata(project) -> dict:
-    default_tags = ["shorts", "viral", "trending", "facts", "darkbrainscroll", "youtubeShorts"]
+    default_tags = ["shorts", "viral", "trending", "storytime", "darkbrainscroll", "youtubeShorts"]
     tags = []
     for tag in [*project.topic.hashtags[:10], *[f"#{tag}" for tag in default_tags]]:
         normalized = tag.lstrip("#").strip()
@@ -78,8 +78,15 @@ def build_youtube_metadata(project) -> dict:
             tags.append(normalized)
 
     title = truncate_text(f"{project.topic.title} | {settings.CHANNEL_BRAND_NAME} #Shorts", 95)
+    niche_descriptions = {
+        "glam": "scroll-stopping glam, dance, and creator-style shorts",
+        "celebrity": "celebrity moments, glam reactions, and social buzz shorts",
+        "reddit": "POV drama and story-driven shorts",
+        "psychology": "social psychology and attraction-pattern shorts",
+    }
+    channel_blurb = niche_descriptions.get(project.niche, "fast viral story-driven shorts")
     description_lines = [
-        f"{settings.CHANNEL_BRAND_NAME} brings you fast viral facts and story-driven shorts.",
+        f"{settings.CHANNEL_BRAND_NAME} brings you {channel_blurb}.",
         "",
         project.topic.description or project.topic.script,
         "",
