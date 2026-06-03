@@ -60,19 +60,90 @@ def _pulse_wave(phase: float, duty: float = 0.28) -> float:
     return 1.0 if (phase % 1.0) < duty else -1.0
 
 
+def _saw_wave(phase: float) -> float:
+    cycle = phase % 1.0
+    return (2.0 * cycle) - 1.0
+
+
+def _sine_wave(phase: float) -> float:
+    return math.sin(2 * math.pi * phase)
+
+
+def _brainrot_profile(project: VideoProject) -> dict:
+    title_seed = sum(ord(char) for char in (project.topic.title or ""))
+    style_index = (project.id + title_seed) % 5
+    profiles = [
+        {
+            "name": "club",
+            "bpm": 126,
+            "chords": [(220.00, 277.18, 329.63), (246.94, 311.13, 369.99), (196.00, 246.94, 293.66)],
+            "pad_wave": _saw_wave,
+            "lead_wave": _pulse_wave,
+            "kick": 0.46,
+            "snare": 0.13,
+            "hat": 0.05,
+            "arp_divisor": 2,
+        },
+        {
+            "name": "luxury",
+            "bpm": 112,
+            "chords": [(174.61, 220.00, 261.63), (196.00, 246.94, 293.66), (220.00, 261.63, 329.63)],
+            "pad_wave": _triangle_wave,
+            "lead_wave": _sine_wave,
+            "kick": 0.34,
+            "snare": 0.08,
+            "hat": 0.03,
+            "arp_divisor": 4,
+        },
+        {
+            "name": "beach",
+            "bpm": 104,
+            "chords": [(196.00, 246.94, 293.66), (220.00, 277.18, 329.63), (246.94, 293.66, 369.99)],
+            "pad_wave": _sine_wave,
+            "lead_wave": _triangle_wave,
+            "kick": 0.28,
+            "snare": 0.06,
+            "hat": 0.02,
+            "arp_divisor": 4,
+        },
+        {
+            "name": "fitness",
+            "bpm": 132,
+            "chords": [(246.94, 311.13, 369.99), (220.00, 277.18, 329.63), (261.63, 329.63, 392.00)],
+            "pad_wave": _saw_wave,
+            "lead_wave": _pulse_wave,
+            "kick": 0.48,
+            "snare": 0.12,
+            "hat": 0.06,
+            "arp_divisor": 2,
+        },
+        {
+            "name": "nightlife",
+            "bpm": 118,
+            "chords": [(155.56, 196.00, 233.08), (174.61, 220.00, 261.63), (185.00, 233.08, 277.18)],
+            "pad_wave": _triangle_wave,
+            "lead_wave": _saw_wave,
+            "kick": 0.40,
+            "snare": 0.10,
+            "hat": 0.045,
+            "arp_divisor": 2,
+        },
+    ]
+    return profiles[style_index]
+
+
 def _write_brainrot_wave(project: VideoProject, wav_path: Path) -> None:
     duration = max(60, int(project.duration_seconds or 120))
     total_samples = duration * SAMPLE_RATE
     rng = random.Random(project.id * 7919)
-    bpm = 104 + (project.id % 18)
+    profile = _brainrot_profile(project)
+    bpm = profile["bpm"] + (project.id % 4)
     beat = 60.0 / bpm
-    chord_sets = [
-        (220.00, 277.18, 329.63),
-        (246.94, 293.66, 369.99),
-        (196.00, 246.94, 293.66),
-        (174.61, 220.00, 261.63),
-    ]
+    chord_sets = profile["chords"]
     progression = [chord_sets[(project.id + index) % len(chord_sets)] for index in range(max(4, math.ceil(duration / (beat * 8))))]
+    pad_wave = profile["pad_wave"]
+    lead_wave = profile["lead_wave"]
+    arp_divisor = profile["arp_divisor"]
 
     with wave.open(str(wav_path), "wb") as handle:
         handle.setnchannels(2)
@@ -95,24 +166,27 @@ def _write_brainrot_wave(project: VideoProject, wav_path: Path) -> None:
             snare_env = max(0.0, 1.0 - (abs(beat_phase - snare_center) / 0.12)) if abs(beat_phase - snare_center) < 0.12 else 0.0
             hat_env = max(0.0, 1.0 - (((t % (beat / 2)) / (beat / 2)) / 0.18)) if (t % (beat / 2)) < (beat / 2) * 0.18 else 0.0
 
-            sub = math.sin(2 * math.pi * (root / 2) * t) * 0.10
+            sub = math.sin(2 * math.pi * (root / 2) * t) * (0.08 + ((project.id % 3) * 0.015))
             pad = (
-                _triangle_wave(phase_root) * 0.10
-                + _triangle_wave(phase_third) * 0.07
-                + _triangle_wave(phase_fifth) * 0.06
+                pad_wave(phase_root) * 0.09
+                + pad_wave(phase_third) * 0.06
+                + pad_wave(phase_fifth) * 0.05
             )
-            arp_selector = int((t / (beat / 2)) % 3)
-            arp_freq = (root, third, fifth)[arp_selector] * (2 if bar_phase > 0.5 else 1)
-            arp = _pulse_wave((t * arp_freq) % 1.0, duty=0.22) * 0.035
-            kick = math.sin(2 * math.pi * (48 + kick_env * 34) * t) * kick_env * 0.40
-            snare_noise = (rng.random() * 2.0 - 1.0) * snare_env * 0.16
-            hat_noise = (rng.random() * 2.0 - 1.0) * hat_env * 0.05
+            arp_selector = int((t / (beat / arp_divisor)) % 3)
+            arp_freq = (root, third, fifth)[arp_selector] * (2 if bar_phase > 0.5 else 1 + ((project.id % 2) * 0.5))
+            arp_phase = (t * arp_freq) % 1.0
+            arp = lead_wave(arp_phase) * (0.025 + ((project.id % 5) * 0.004))
+            kick = math.sin(2 * math.pi * (48 + kick_env * (28 + (project.id % 7))) * t) * kick_env * profile["kick"]
+            snare_noise = (rng.random() * 2.0 - 1.0) * snare_env * profile["snare"]
+            hat_noise = (rng.random() * 2.0 - 1.0) * hat_env * profile["hat"]
+            side_chain = 1.0 - (kick_env * 0.38)
 
             fade_in = min(1.0, t / 2.0)
             fade_out = min(1.0, max(0.0, (duration - t) / 3.0))
             envelope = fade_in * fade_out
 
-            sample = _soft_clip((sub + pad + arp + kick + snare_noise + hat_noise) * envelope)
+            melodic = (sub + pad + arp) * side_chain
+            sample = _soft_clip((melodic + kick + snare_noise + hat_noise) * envelope)
             stereo_spread = 0.92 + 0.08 * math.sin(2 * math.pi * 0.09 * t)
             left = int(sample * stereo_spread * 32767)
             right = int(sample * (2 - stereo_spread) * 32767)

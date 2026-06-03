@@ -343,14 +343,15 @@ def render_slideshow_video(
         )
 
     final_command = [ffmpeg_path, "-y", "-i", str(assembled_path)]
-    if video_filters:
-        final_command.extend(["-vf", ",".join(video_filters)])
     has_voiceover = bool(project.voiceover_file and Path(project.voiceover_file).exists())
     has_music = bool(project.music_file and Path(project.music_file).exists())
     if has_voiceover:
         final_command.extend(["-i", project.voiceover_file])
     if has_music:
         final_command.extend(["-stream_loop", "-1", "-i", project.music_file])
+
+    if video_filters:
+        final_command.extend(["-vf", ",".join(video_filters)])
 
     if has_voiceover and has_music:
         final_command.extend(
