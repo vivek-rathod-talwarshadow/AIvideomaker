@@ -123,7 +123,7 @@ class SchedulerLock(TimeStampedModel):
 class AutomationState(TimeStampedModel):
     key = models.CharField(max_length=80, unique=True, default="global")
     default_voice_name = models.CharField(max_length=80, default="en-US-ChristopherNeural")
-    brainrot_mode = models.BooleanField(default=False)
+    brainrot_mode = models.BooleanField(default=True)
     is_enabled = models.BooleanField(default=True)
     auto_upload = models.BooleanField(default=True)
     retry_failures = models.BooleanField(default=True)

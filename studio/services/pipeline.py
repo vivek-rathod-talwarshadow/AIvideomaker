@@ -216,7 +216,7 @@ def get_automation_state() -> AutomationState:
         key="global",
         defaults={
             "default_voice_name": resolve_voice_name(getattr(settings, "EDGE_TTS_VOICE", DEFAULT_VOICE_NAME)),
-            "brainrot_mode": False,
+            "brainrot_mode": True,
             "is_enabled": True,
             "auto_upload": True,
             "retry_failures": True,

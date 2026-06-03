@@ -18,6 +18,7 @@ from .utils import media_dir
 
 SAMPLE_RATE = 44100
 USER_AGENT = "DarkBrainScrollBot/1.0"
+FREEBGMUSIC_API_BASE = "https://freebgmusic.info/api/v1/tracks"
 
 
 def _resolve_ffmpeg_binary() -> str | None:
@@ -222,6 +223,109 @@ def _recent_pixabay_audio_ids(limit: int = 24) -> list[str]:
         if value:
             audio_ids.append(value)
     return audio_ids
+
+
+def _recent_freebgmusic_track_ids(limit: int = 24) -> list[str]:
+    track_ids: list[str] = []
+    for item in VideoProject.objects.order_by("-id")[:limit]:
+        value = str((item.caption_style or {}).get("freebgmusic_track_id") or "").strip()
+        if value:
+            track_ids.append(value)
+    return track_ids
+
+
+def _freebgmusic_headers() -> dict[str, str]:
+    token = str(getattr(settings, "FREEBGMUSIC_API_KEY", "")).strip()
+    headers = {"User-Agent": USER_AGENT, "Accept": "application/json"}
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+        headers["X-API-Key"] = token
+    return headers
+
+
+def _freebgmusic_queries(project: VideoProject) -> list[str]:
+    vibe = _music_vibe(project)
+    title = " ".join(str(project.topic.title or "").split())
+    niche = str(project.niche or "").replace("-", " ").strip()
+    render_mode = _project_render_mode(project)
+    candidates = [
+        vibe,
+        f"{vibe} instrumental" if vibe else "",
+        f"{vibe} background music" if vibe else "",
+        f"{niche} background music" if niche else "",
+        f"{niche} instrumental" if niche else "",
+        "upbeat" if render_mode == "brainrot-video" else "",
+        "electronic" if render_mode == "brainrot-video" else "",
+        "cinematic",
+        "motivational",
+        "soundtrack",
+        title,
+    ]
+    queries: list[str] = []
+    seen: set[str] = set()
+    for item in candidates:
+        normalized = " ".join(str(item).split()).strip()
+        if normalized and normalized.lower() not in seen:
+            seen.add(normalized.lower())
+            queries.append(normalized)
+    if not queries:
+        queries.append("background")
+    seed = f"{project.id}|{project.topic.title}|{project.topic.script[:120]}"
+    return sorted(queries, key=lambda item: hashlib.sha1(f"{seed}|{item}".encode("utf-8")).hexdigest())
+
+
+def _freebgmusic_candidates(query: str, page: int = 1, per_page: int = 12) -> list[dict]:
+    response = requests.get(
+        FREEBGMUSIC_API_BASE,
+        params={"search": query, "page": page, "per_page": per_page},
+        headers=_freebgmusic_headers(),
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    data = payload.get("data")
+    return data if isinstance(data, list) else []
+
+
+def _download_freebgmusic_audio(project: VideoProject, output_path: Path) -> str:
+    queries = _freebgmusic_queries(project)
+    recent_track_ids = set(_recent_freebgmusic_track_ids())
+    page_seed = sum(ord(char) for char in f"{project.id}|{project.topic.title}")
+    pages = [1 + ((page_seed + offset) % 3) for offset in range(3)]
+    last_error = ""
+
+    for query in queries[:6]:
+        for page in pages:
+            try:
+                candidates = _freebgmusic_candidates(query, page=page, per_page=12)
+            except Exception as exc:
+                last_error = str(exc)
+                continue
+            ranked_candidates = sorted(
+                candidates,
+                key=lambda item: hashlib.sha1(f"{query}|{page}|{item.get('id','')}".encode("utf-8")).hexdigest(),
+            )
+            for candidate in ranked_candidates:
+                track_id = str(candidate.get("id") or "").strip()
+                if track_id and track_id in recent_track_ids:
+                    continue
+                audio_url = str(candidate.get("file_path") or "").strip()
+                if not audio_url:
+                    continue
+                _download_binary(audio_url, output_path)
+                _store_music_metadata(
+                    project,
+                    music_source="freebgmusic",
+                    music_query=query,
+                    freebgmusic_track_id=track_id,
+                    music_track=str(candidate.get("title") or track_id or Path(audio_url).name),
+                    music_artist=str(candidate.get("artist") or ""),
+                )
+                return str(output_path)
+
+    if last_error:
+        raise RuntimeError(f"FreeBGMusic lookup failed: {last_error}")
+    raise RuntimeError("FreeBGMusic lookup returned no usable tracks for this project.")
 
 
 def _pixabay_audio_queries(project: VideoProject) -> list[str]:
@@ -537,9 +641,59 @@ def _generate_brainrot_instrumental(project: VideoProject, output_path: Path) ->
 def generate_background_music(project: VideoProject) -> str:
     output_dir = media_dir("projects", str(project.id), "audio")
     output_path = output_dir / "background-music.mp3"
+    freebgmusic_token = str(getattr(settings, "FREEBGMUSIC_API_KEY", "")).strip()
     pixabay_token = str(getattr(settings, "PIXABAY_API_KEY", "")).strip()
 
-    if pixabay_token:
+    if freebgmusic_token:
+        try:
+            _download_freebgmusic_audio(project, output_path)
+        except Exception as exc:
+            fallback_reason = str(exc).strip()
+            if pixabay_token:
+                try:
+                    _download_pixabay_audio(project, output_path)
+                except Exception:
+                    if _project_render_mode(project) == "brainrot-video":
+                        _generate_brainrot_instrumental(project, output_path)
+                        _store_music_metadata(
+                            project,
+                            music_source="generated-fallback",
+                            music_error=fallback_reason[:240],
+                        )
+                    else:
+                        local_track = _pick_local_track(project)
+                        if local_track:
+                            output_path.write_bytes(local_track.read_bytes())
+                            _store_music_metadata(
+                                project,
+                                music_source="local-fallback",
+                                music_error=fallback_reason[:240],
+                            )
+                        else:
+                            project.music_file = ""
+                            project.save(update_fields=["music_file", "updated_at"])
+                            return ""
+            elif _project_render_mode(project) == "brainrot-video":
+                _generate_brainrot_instrumental(project, output_path)
+                _store_music_metadata(
+                    project,
+                    music_source="generated-fallback",
+                    music_error=fallback_reason[:240],
+                )
+            else:
+                local_track = _pick_local_track(project)
+                if local_track:
+                    output_path.write_bytes(local_track.read_bytes())
+                    _store_music_metadata(
+                        project,
+                        music_source="local-fallback",
+                        music_error=fallback_reason[:240],
+                    )
+                else:
+                    project.music_file = ""
+                    project.save(update_fields=["music_file", "updated_at"])
+                    return ""
+    elif pixabay_token:
         try:
             _download_pixabay_audio(project, output_path)
         except Exception as exc:

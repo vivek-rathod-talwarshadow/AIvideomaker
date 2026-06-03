@@ -145,6 +145,10 @@
             font-size: 0.9rem;
         }
 
+        .niche-picker[hidden] {
+            display: none !important;
+        }
+
         .mode-panel {
             margin-top: 16px;
             padding: 14px 16px;
@@ -486,12 +490,17 @@
                         </form>
                         <form method="post" action="{% url 'start-new-project' %}">
                             {% csrf_token %}
-                            <select name="niche" aria-label="Video niche">
-                                <option value="">Auto Pick Best Niche</option>
-                                {% for value, label in niche_options %}
-                                    <option value="{{ value }}">{{ label }}</option>
-                                {% endfor %}
-                            </select>
+                            <div id="niche-picker" class="niche-picker" {% if automation_state.brainrot_mode %}hidden{% endif %}>
+                                <select name="niche" aria-label="Video niche">
+                                    <option value="">Auto Pick Best Niche</option>
+                                    {% for value, label in niche_options %}
+                                        <option value="{{ value }}">{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                                <div class="muted" style="margin-top: 6px;">
+                                    Turn Brainrot Mode off to choose Reddit story, horror story, AI money, motivation, psychology, theory, crime, and more.
+                                </div>
+                            </div>
                             <button class="btn btn-secondary" type="submit">Create New Video</button>
                         </form>
                         <form method="post" action="{% url 'start-generate' %}">
@@ -774,6 +783,8 @@
         const voiceDescription = document.getElementById("voice-description");
         const voiceSamplePlayer = document.getElementById("voice-sample-player");
         const playVoiceSampleButton = document.getElementById("play-voice-sample");
+        const brainrotModeToggle = document.querySelector('input[name="brainrot_mode"]');
+        const nichePicker = document.getElementById("niche-picker");
 
         const badgeTone = (status) => {
             if (["ready", "posted"].includes(status)) return "badge-ok";
@@ -806,6 +817,11 @@
         };
 
         const selectedVoiceOption = () => voiceSelect?.options?.[voiceSelect.selectedIndex] || null;
+
+        const syncBrainrotModeUi = () => {
+            if (!brainrotModeToggle || !nichePicker) return;
+            nichePicker.hidden = brainrotModeToggle.checked;
+        };
 
         const syncVoiceDescription = () => {
             const option = selectedVoiceOption();
@@ -988,6 +1004,10 @@
         if (playVoiceSampleButton) {
             playVoiceSampleButton.addEventListener("click", playVoiceSample);
         }
+        if (brainrotModeToggle) {
+            brainrotModeToggle.addEventListener("change", syncBrainrotModeUi);
+        }
+        syncBrainrotModeUi();
         document.addEventListener("visibilitychange", () => scheduleDashboardRefresh("idle"));
         scheduleDashboardRefresh("idle");
     </script>
