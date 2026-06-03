@@ -153,15 +153,16 @@ def generate_background_music(project: VideoProject) -> str:
     output_dir = media_dir("projects", str(project.id), "audio")
     output_path = output_dir / "background-music.mp3"
 
-    local_track = _pick_local_track(project)
-    if local_track:
-        output_path.write_bytes(local_track.read_bytes())
-    elif _project_render_mode(project) == "brainrot-video":
+    if _project_render_mode(project) == "brainrot-video":
         _generate_brainrot_instrumental(project, output_path)
     else:
-        project.music_file = ""
-        project.save(update_fields=["music_file", "updated_at"])
-        return ""
+        local_track = _pick_local_track(project)
+        if local_track:
+            output_path.write_bytes(local_track.read_bytes())
+        else:
+            project.music_file = ""
+            project.save(update_fields=["music_file", "updated_at"])
+            return ""
 
     project.music_file = str(output_path)
     project.save(update_fields=["music_file", "updated_at"])

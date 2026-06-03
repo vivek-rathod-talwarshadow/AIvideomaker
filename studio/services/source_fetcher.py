@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 import hashlib
-import shutil
 import textwrap
 from io import BytesIO
 from PIL import Image, ImageDraw, ImageFont
@@ -61,20 +60,199 @@ GENERIC_FALLBACK_IMAGE_SOURCES = (
     "https://loremflickr.com/900/1600/{query_slug}",
 )
 BRAINROT_VIDEO_QUERY_HINTS = [
-    "fashion model walking city",
-    "attractive woman walking city street style",
-    "glamorous woman luxury hotel lobby",
-    "beach lifestyle woman slow motion",
-    "travel influencer woman city aesthetic",
-    "female fitness gym workout portrait",
-    "yoga wellness woman sunrise",
-    "beauty skincare woman mirror routine",
-    "couple vacation luxury lifestyle",
-    "female entrepreneur office lifestyle",
-    "summer vacation poolside woman",
-    "cinematic slow motion woman walking",
-    "festival dancing woman lifestyle",
-    "luxury car woman lifestyle",
+    "glamorous adult woman fashion portrait video",
+    "fashion model woman city walk video",
+    "anime style cosplay woman video",
+    "japanese woman street style video",
+    "korean woman fashion lifestyle video",
+    "latina woman lifestyle video",
+    "cute adult woman smiling lifestyle video",
+    "beautiful woman fashion portrait video",
+    "fashion woman outfit transition video",
+    "model woman photoshoot video",
+    "glamour woman luxury fashion video",
+    "stylish woman street fashion video",
+    "trendy woman influencer lifestyle video",
+    "influencer woman daily life video",
+    "beach lifestyle woman video",
+    "summer vacation woman video",
+    "swimwear model woman beach video",
+    "fitness woman workout video",
+    "gym woman portrait workout video",
+    "yoga woman wellness video",
+    "sporty woman lifestyle video",
+    "dancing woman festival video",
+    "smiling woman portrait video",
+    "happy woman city lifestyle video",
+    "luxury lifestyle woman video",
+    "rich lifestyle woman video",
+    "travel woman aesthetic video",
+    "adventure travel woman video",
+    "office woman business lifestyle video",
+    "businesswoman office portrait video",
+    "woman entrepreneur workspace video",
+    "boss woman city office video",
+    "party woman nightlife video",
+    "festival fashion woman video",
+    "concert crowd woman video",
+    "nightlife woman city video",
+    "city woman street style video",
+    "urban woman lifestyle video",
+    "nature woman lifestyle video",
+    "hiking woman adventure video",
+    "camping woman outdoor video",
+    "photographer woman creative video",
+    "artist woman studio video",
+    "music lover woman lifestyle video",
+    "gamer woman setup video",
+    "streamer woman desk video",
+    "cosplay woman portrait video",
+    "manga style cosplay woman video",
+    "kawaii fashion woman video",
+    "harajuku fashion woman video",
+    "thai woman lifestyle video",
+    "vietnamese woman lifestyle video",
+    "filipino woman lifestyle video",
+    "indonesian woman lifestyle video",
+    "malaysian woman lifestyle video",
+    "singaporean woman city lifestyle video",
+    "indian woman fashion lifestyle video",
+    "pakistani woman fashion video",
+    "bangladeshi woman lifestyle video",
+    "nepali woman lifestyle video",
+    "sri lankan woman travel video",
+    "brazilian woman beach lifestyle video",
+    "mexican woman lifestyle video",
+    "colombian woman city lifestyle video",
+    "argentine woman fashion video",
+    "spanish woman city fashion video",
+    "italian woman luxury fashion video",
+    "french woman chic fashion video",
+    "german woman urban lifestyle video",
+    "british woman city style video",
+    "irish woman lifestyle video",
+    "swedish woman minimalist fashion video",
+    "norwegian woman travel lifestyle video",
+    "danish woman scandinavian style video",
+    "finnish woman lifestyle video",
+    "dutch woman city style video",
+    "belgian woman chic lifestyle video",
+    "greek woman vacation video",
+    "turkish woman fashion lifestyle video",
+    "russian woman city fashion video",
+    "ukrainian woman street style video",
+    "polish woman lifestyle video",
+    "czech woman city lifestyle video",
+    "romanian woman fashion video",
+    "middle eastern woman luxury lifestyle video",
+    "arab woman fashion lifestyle video",
+    "lebanese woman chic lifestyle video",
+    "persian woman elegant fashion video",
+    "african woman fashion lifestyle video",
+    "nigerian woman luxury lifestyle video",
+    "ethiopian woman lifestyle video",
+    "south african woman travel video",
+    "american woman city lifestyle video",
+    "canadian woman casual fashion video",
+    "australian woman beach lifestyle video",
+    "new zealand woman adventure video",
+    "blonde woman fashion portrait video",
+    "brunette woman city fashion video",
+    "redhead woman lifestyle video",
+    "curly hair woman beauty video",
+    "long hair woman fashion video",
+    "short hair woman chic video",
+    "ponytail woman sporty video",
+    "runway model woman video",
+    "street style woman fashion video",
+    "aesthetic woman lifestyle video",
+    "minimalist woman lifestyle video",
+    "vintage fashion woman video",
+    "retro fashion woman video",
+    "y2k fashion woman video",
+    "e girl fashion woman video",
+    "soft aesthetic woman video",
+    "cottagecore woman lifestyle video",
+    "fairycore fashion woman video",
+    "dark feminine woman lifestyle video",
+    "elegant woman luxury video",
+    "classy woman city lifestyle video",
+    "chic woman fashion video",
+    "luxury fashion woman video",
+    "designer fashion woman video",
+    "makeup woman beauty video",
+    "beauty woman skincare video",
+    "skincare routine woman video",
+    "wellness woman lifestyle video",
+    "healthy lifestyle woman video",
+    "coffee shop woman lifestyle video",
+    "cafe woman aesthetic video",
+    "book lover woman cafe video",
+    "romantic woman dreamy lifestyle video",
+    "cute smile woman portrait video",
+    "selfie woman influencer video",
+    "vlogger woman lifestyle video",
+    "short form creator woman video",
+    "content creator woman setup video",
+    "dance creator woman video",
+    "lifestyle influencer woman video",
+    "travel influencer woman video",
+    "fashion influencer woman video",
+    "beauty influencer woman video",
+    "fitness influencer woman video",
+    "tropical vacation woman video",
+    "island resort woman video",
+    "vacation woman sunset video",
+    "poolside woman luxury video",
+    "ocean lifestyle woman video",
+    "surf woman beach video",
+    "skater woman street video",
+    "biker woman city video",
+    "car lifestyle woman video",
+    "supercar woman luxury video",
+    "motorcycle woman lifestyle video",
+    "tennis woman sports video",
+    "volleyball woman beach sports video",
+    "basketball woman athletic video",
+    "soccer woman athletic video",
+    "runner woman fitness video",
+    "athletic woman portrait video",
+    "pilates woman wellness video",
+    "dance fitness woman video",
+    "cheerful woman lifestyle video",
+    "confident woman city video",
+    "independent woman lifestyle video",
+    "modern woman fashion video",
+    "trendsetter woman street style video",
+    "fashionista woman city video",
+    "luxury traveler woman video",
+    "backpacker woman travel video",
+    "adventure traveler woman video",
+    "festival fashion woman video",
+    "streetwear woman city video",
+    "casual fashion woman video",
+    "formal fashion woman video",
+    "evening dress woman video",
+    "summer fashion woman video",
+    "winter fashion woman video",
+    "spring fashion woman video",
+    "autumn fashion woman video",
+    "glam woman luxury video",
+    "celebrity look woman fashion video",
+    "actress style woman video",
+    "pop star style woman video",
+    "idol style woman dance video",
+    "k pop style woman video",
+    "j pop style woman video",
+    "digital creator woman video",
+    "ai influencer woman video",
+    "virtual model woman video",
+    "cinematic woman portrait video",
+    "viral style woman lifestyle video",
+    "trending fashion woman video",
+    "aesthetic model woman video",
+    "lifestyle model woman video",
+    "fashion photoshoot woman video",
 ]
 GENERIC_FALLBACK_VIDEO_SOURCES = (
     "https://samplelib.com/mp4/sample-5s.mp4",
@@ -95,16 +273,6 @@ REGULAR_VIDEO_QUERY_HINTS = {
     "theory": ["mysterious silhouette footage", "glitch screen footage", "late night computer footage", "dark city night footage"],
     "crime": ["detective board footage", "city alley night footage", "police evidence wall footage", "interrogation room footage"],
 }
-SAFE_BRAINROT_TERM_MAP = {
-    "sexy": "glamorous adult woman fashion",
-    "hot girl": "fashion model woman lifestyle",
-    "cute girl": "stylish young adult woman lifestyle",
-    "attractive women": "stylish women street fashion",
-    "girl": "adult woman lifestyle",
-    "girlfriend": "couple lifestyle woman",
-}
-
-
 def _load_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     font_candidates = [
         "DejaVuSans-Bold.ttf",
@@ -451,29 +619,20 @@ def _video_search_terms(project: VideoProject, limit: int = 8) -> list[str]:
     return terms
 
 
+def _recent_remote_video_urls(limit: int = 500) -> set[str]:
+    urls: set[str] = set()
+    for asset in MediaAsset.objects.filter(asset_type="video").order_by("-created_at")[:limit]:
+        remote_url = str((asset.metadata or {}).get("remote_asset_url") or "").strip()
+        if remote_url:
+            urls.add(remote_url)
+    return urls
+
+
 def _build_brainrot_scene_queries(project: VideoProject, scene: dict) -> list[str]:
-    visual_hint = str(scene.get("visual_hint") or "").strip()
-    keyword_phrase = _scene_keyword_phrase(str(scene.get("text") or ""), max_words=8)
-    normalized_terms = [visual_hint, keyword_phrase, *_video_search_terms(project)]
-    safe_terms: list[str] = []
-    for term in normalized_terms:
-        safe_term = term
-        for source, target in SAFE_BRAINROT_TERM_MAP.items():
-            safe_term = safe_term.replace(source, target)
-        safe_term = " ".join(safe_term.split()).strip()
-        if safe_term:
-            safe_terms.append(safe_term)
-    candidates = [*safe_terms, *BRAINROT_VIDEO_QUERY_HINTS]
-    queries: list[str] = []
-    seen: set[str] = set()
-    for item in candidates:
-        normalized = " ".join(item.split()).strip()
-        if normalized and normalized.lower() not in seen:
-            seen.add(normalized.lower())
-            queries.append(normalized)
+    seed_text = f"{project.id}|{scene.get('text', '')}|{scene.get('visual_hint', '')}"
     ordered = sorted(
-        queries,
-        key=lambda item: hashlib.sha1(f"{project.id}|{scene.get('text', '')}|{item}".encode("utf-8")).hexdigest(),
+        BRAINROT_VIDEO_QUERY_HINTS,
+        key=lambda item: hashlib.sha1(f"{seed_text}|{item}".encode("utf-8")).hexdigest(),
     )
     return ordered
 
@@ -591,7 +750,11 @@ def _resolve_pexels_video(query: str, output_path: Path, used_urls: set[str], pe
         videos = _pexels_video_candidates(query, per_page=per_page)
     except requests.RequestException:
         return None
-    for video in videos:
+    ranked_videos = sorted(
+        videos,
+        key=lambda video: hashlib.sha1(f"{query}|{video.get('id','')}".encode("utf-8")).hexdigest(),
+    )
+    for video in ranked_videos:
         file_info = _pick_pexels_video_file(video)
         candidate_url = file_info.get("link") if file_info else ""
         if not candidate_url or candidate_url in used_urls:
@@ -613,7 +776,11 @@ def _resolve_pixabay_video(query: str, output_path: Path, used_urls: set[str], p
         videos = _pixabay_video_candidates(query, per_page=per_page)
     except requests.RequestException:
         return None
-    for video in videos:
+    ranked_videos = sorted(
+        videos,
+        key=lambda video: hashlib.sha1(f"{query}|{video.get('id','')}".encode("utf-8")).hexdigest(),
+    )
+    for video in ranked_videos:
         file_info = _pick_pixabay_video_file(video)
         candidate_url = file_info.get("url") if file_info else ""
         if not candidate_url or candidate_url in used_urls:
@@ -668,20 +835,6 @@ def _resolve_generic_fallback_video(output_path: Path, used_urls: set[str], seed
     return None
 
 
-def _duplicate_existing_video_asset(source_asset_path: str, output_path: Path, query: str) -> dict | None:
-    source_path = Path(source_asset_path)
-    if not source_path.exists():
-        return None
-    shutil.copyfile(source_path, output_path)
-    return {
-        "provider": "project-video-reuse",
-        "credit": "",
-        "source_url": "",
-        "remote_asset_url": source_path.as_posix(),
-        "query": query,
-    }
-
-
 def fetch_video_scene_assets(project: VideoProject, replace_existing: bool = False) -> list[MediaAsset]:
     if replace_existing:
         _clear_existing_assets(project)
@@ -692,8 +845,7 @@ def fetch_video_scene_assets(project: VideoProject, replace_existing: bool = Fal
 
     scene_dir = media_dir("projects", str(project.id), "assets")
     assets: list[MediaAsset] = []
-    downloaded_asset_paths: list[str] = []
-    used_urls: set[str] = set()
+    used_urls: set[str] = _recent_remote_video_urls() if _is_brainrot_video_project(project) else set()
     max_queries_per_scene, per_page = _query_budget()
     is_brainrot = _is_brainrot_video_project(project)
 
@@ -720,10 +872,7 @@ def fetch_video_scene_assets(project: VideoProject, replace_existing: bool = Fal
                 if stock_result:
                     break
         if not stock_result:
-            if is_brainrot and downloaded_asset_paths:
-                fallback_seed = str(scene.get("visual_hint") or scene.get("text") or prompt)
-                stock_result = _duplicate_existing_video_asset(downloaded_asset_paths[index % len(downloaded_asset_paths)], output_path, fallback_seed)
-            else:
+            if not is_brainrot:
                 fallback_seed = str(scene.get("visual_hint") or scene.get("text") or prompt)
                 stock_result = _resolve_generic_fallback_video(output_path, used_urls, fallback_seed)
         if not stock_result:
@@ -745,7 +894,6 @@ def fetch_video_scene_assets(project: VideoProject, replace_existing: bool = Fal
             sort_order=index,
         )
         assets.append(asset)
-        downloaded_asset_paths.append(str(output_path))
 
     return assets
 
