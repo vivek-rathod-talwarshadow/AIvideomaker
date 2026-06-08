@@ -6,71 +6,151 @@
     <title>DarkBrainScroll Automation</title>
     <style>
         :root {
-            --panel: rgba(255, 250, 242, 0.86);
-            --panel-strong: #fffaf2;
-            --ink: #1f1a14;
-            --muted: #6d6258;
-            --line: rgba(73, 58, 39, 0.14);
-            --accent: #d5612a;
-            --accent-soft: #ffefe2;
+            --page: #f7efe3;
+            --page-deep: #ecdec8;
+            --panel: rgba(255, 251, 245, 0.9);
+            --panel-strong: #fffaf3;
+            --panel-deep: #f6ede0;
+            --ink: #201912;
+            --muted: #6f6358;
+            --line: rgba(80, 61, 38, 0.12);
+            --accent: #d46a2f;
+            --accent-strong: #bc5422;
+            --accent-soft: #ffead9;
             --success: #206246;
-            --success-soft: #e3f4eb;
+            --success-soft: #dff2e6;
             --warn: #8a5a11;
-            --warn-soft: #fff1d7;
+            --warn-soft: #fff0d2;
             --danger: #983b36;
             --danger-soft: #fde6e5;
-            --dark: #2f241c;
-            --shadow: 0 20px 60px rgba(74, 49, 24, 0.10);
+            --dark: #30231a;
+            --shadow: 0 24px 60px rgba(92, 63, 28, 0.12);
+            --shadow-soft: 0 10px 28px rgba(92, 63, 28, 0.08);
         }
 
-        * { box-sizing: border-box; }
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
         body {
             margin: 0;
             font-family: Georgia, "Times New Roman", serif;
             color: var(--ink);
             background:
-                radial-gradient(circle at top left, rgba(213, 97, 42, 0.16), transparent 30%),
-                radial-gradient(circle at top right, rgba(63, 118, 89, 0.12), transparent 28%),
-                linear-gradient(180deg, #f8f1e6 0%, #efe6d8 100%);
+                radial-gradient(circle at top left, rgba(212, 106, 47, 0.2), transparent 24%),
+                radial-gradient(circle at 85% 12%, rgba(32, 98, 70, 0.1), transparent 18%),
+                radial-gradient(circle at bottom center, rgba(255, 255, 255, 0.45), transparent 26%),
+                linear-gradient(180deg, var(--page) 0%, var(--page-deep) 100%);
             min-height: 100vh;
         }
 
+        body::before {
+            content: "";
+            position: fixed;
+            inset: 0;
+            pointer-events: none;
+            background-image:
+                linear-gradient(rgba(255, 255, 255, 0.14) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.08) 1px, transparent 1px);
+            background-size: 100% 100%, 48px 48px;
+            opacity: 0.3;
+        }
+
         .shell {
-            width: min(1180px, calc(100% - 32px));
-            margin: 28px auto 40px;
+            position: relative;
+            z-index: 1;
+            width: min(1320px, calc(100% - 32px));
+            margin: 22px auto 42px;
         }
 
         .hero,
         .stat,
         .status-card,
         .table-card,
-        .action-card {
+        .action-card,
+        .overview-card,
+        .snapshot-card {
             border: 1px solid var(--line);
             background: var(--panel);
-            border-radius: 24px;
+            border-radius: 26px;
             box-shadow: var(--shadow);
-            backdrop-filter: blur(12px);
+            backdrop-filter: blur(14px);
         }
 
         .hero {
-            padding: 28px;
-            background: linear-gradient(135deg, rgba(255,255,255,0.88), rgba(255,244,230,0.92));
+            padding: 26px;
             display: grid;
-            grid-template-columns: 1.8fr 1fr;
-            gap: 22px;
+            grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.95fr);
+            gap: 20px;
+            background:
+                linear-gradient(140deg, rgba(255, 255, 255, 0.94), rgba(255, 246, 234, 0.92)),
+                linear-gradient(180deg, rgba(212, 106, 47, 0.06), transparent 55%);
+        }
+
+        .hero-copy {
+            display: grid;
+            gap: 18px;
+            align-content: start;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            width: fit-content;
+            padding: 8px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(212, 106, 47, 0.16);
+            background: rgba(255, 241, 226, 0.92);
+            color: var(--accent-strong);
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
         }
 
         .hero h1 {
-            margin: 0 0 10px;
-            font-size: clamp(2rem, 4vw, 4rem);
-            line-height: 0.95;
-            letter-spacing: -0.04em;
+            margin: 0;
+            font-size: clamp(2.5rem, 5vw, 4.5rem);
+            line-height: 0.92;
+            letter-spacing: -0.05em;
+            max-width: 9ch;
         }
 
-        .hero p, .muted {
+        .hero p,
+        .muted {
             color: var(--muted);
         }
 
+        .hero-lead {
+            max-width: 56ch;
+            margin: 0;
+            font-size: 1.02rem;
+            line-height: 1.6;
+        }
+
+        .overview-grid,
+        .snapshot-grid,
+        .grid-stats,
+        .grid-status,
+        .table-grid,
+        .preview-grid,
+        .voice-summary,
+        .status-row {
+            display: grid;
+            gap: 16px;
+        }
+
+        .overview-grid {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .overview-card,
+        .snapshot-card,
         .action-card,
         .table-card,
         .stat,
@@ -78,34 +158,140 @@
             padding: 18px;
         }
 
+        .overview-card {
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(252, 244, 233, 0.94));
+            box-shadow: var(--shadow-soft);
+        }
+
+        .overview-card strong {
+            display: block;
+            margin-top: 10px;
+            font-size: 2rem;
+            line-height: 1;
+        }
+
+        .overview-card p {
+            margin: 8px 0 0;
+            line-height: 1.45;
+        }
+
+        .snapshot-grid {
+            grid-template-columns: 1.3fr 1fr;
+        }
+
+        .snapshot-card {
+            background: linear-gradient(180deg, rgba(247, 238, 225, 0.95), rgba(255, 250, 243, 0.9));
+            box-shadow: var(--shadow-soft);
+        }
+
+        .snapshot-card h3,
+        .status-card h3,
+        .table-card h2,
+        .action-card h3 {
+            margin: 0;
+        }
+
+        .snapshot-card p {
+            margin: 10px 0 0;
+            line-height: 1.5;
+        }
+
         .hero-actions {
             display: flex;
             flex-direction: column;
-            gap: 16px;
         }
 
-        .actions {
-            display: flex;
-            gap: 12px;
-            flex-wrap: wrap;
+        .action-card {
+            background:
+                linear-gradient(180deg, rgba(255, 250, 244, 0.98), rgba(247, 236, 221, 0.95));
+            height: 100%;
+        }
+
+        .status-row {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
             margin-top: 14px;
         }
 
-        .voice-panel {
-            margin-top: 18px;
-            padding: 16px;
-            border-radius: 18px;
+        .status-chip {
+            padding: 14px 16px;
+            border-radius: 20px;
             border: 1px solid var(--line);
-            background: linear-gradient(180deg, rgba(255, 247, 238, 0.95), rgba(255, 240, 226, 0.82));
+            background: rgba(255, 255, 255, 0.74);
+        }
+
+        .status-chip .stat-label {
+            margin-bottom: 8px;
+        }
+
+        .progress-shell,
+        .mode-panel,
+        .voice-panel,
+        .message-stack,
+        .action-stack {
+            margin-top: 18px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 14px;
+            border-radius: 999px;
+            background: rgba(47, 36, 28, 0.08);
+            overflow: hidden;
+            border: 1px solid var(--line);
+        }
+
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #ea6a1f, #f7b426 60%, #f7cf61);
+            transition: width 0.35s ease;
+        }
+
+        .progress-meta {
+            margin-top: 10px;
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            font-size: 0.95rem;
+            color: var(--muted);
+        }
+
+        .mode-panel,
+        .voice-panel,
+        .mini-card {
+            padding: 16px;
+            border-radius: 20px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.58);
+        }
+
+        .inline-toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            color: var(--ink);
+            font-size: 0.98rem;
+            font-weight: 700;
+        }
+
+        .inline-toggle input {
+            inline-size: 18px;
+            block-size: 18px;
+            accent-color: var(--accent);
+        }
+
+        .niche-picker[hidden] {
+            display: none !important;
         }
 
         .voice-panel h4 {
-            margin: 0;
-            font-size: 1rem;
+            margin: 4px 0 0;
+            font-size: 1.05rem;
         }
 
         .voice-panel p {
-            margin: 6px 0 0;
+            margin: 8px 0 0;
+            line-height: 1.5;
         }
 
         .voice-controls {
@@ -116,72 +302,86 @@
             margin-top: 14px;
         }
 
+        .voice-summary {
+            grid-template-columns: auto minmax(0, 1fr);
+            align-items: center;
+            margin-top: 14px;
+        }
+
         .field label {
             display: block;
             margin-bottom: 6px;
-            font-size: 0.8rem;
+            font-size: 0.78rem;
             font-weight: 700;
-            letter-spacing: 0.05em;
+            letter-spacing: 0.08em;
             text-transform: uppercase;
             color: var(--muted);
         }
 
-        .field select {
+        .field select,
+        .niche-picker select {
             width: 100%;
             border: 1px solid var(--line);
             border-radius: 14px;
             padding: 12px 14px;
             font: inherit;
             color: var(--ink);
-            background: rgba(255, 255, 255, 0.94);
+            background: rgba(255, 255, 255, 0.96);
         }
 
-        .inline-toggle {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            margin-top: 10px;
-            color: var(--muted);
-            font-size: 0.9rem;
+        .niche-picker {
+            margin-bottom: 10px;
         }
 
-        .niche-picker[hidden] {
-            display: none !important;
+        .actions {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
         }
 
-        .mode-panel {
-            margin-top: 16px;
-            padding: 14px 16px;
-            border-radius: 18px;
-            border: 1px solid var(--line);
-            background: rgba(255, 255, 255, 0.58);
-        }
-
-        .voice-meta {
-            margin-top: 10px;
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            align-items: center;
+        .actions form,
+        .actions a {
+            min-width: 0;
         }
 
         .btn {
             appearance: none;
             border: none;
-            border-radius: 999px;
-            padding: 12px 18px;
+            width: 100%;
+            border-radius: 16px;
+            padding: 13px 16px;
             font-size: 0.95rem;
             font-weight: 700;
             cursor: pointer;
             text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease;
+            box-shadow: 0 10px 18px rgba(92, 63, 28, 0.08);
         }
 
-        .btn-primary { background: var(--accent); color: white; }
-        .btn-secondary { background: var(--accent-soft); color: var(--accent); }
-        .btn-danger { background: var(--dark); color: #fff8ef; }
+        .btn:hover,
+        .btn:focus-visible {
+            transform: translateY(-1px);
+        }
+
+        .btn-primary {
+            background: linear-gradient(180deg, var(--accent), var(--accent-strong));
+            color: #fffdf9;
+        }
+
+        .btn-secondary {
+            background: linear-gradient(180deg, rgba(255, 238, 220, 0.98), rgba(255, 228, 202, 0.95));
+            color: var(--accent-strong);
+        }
+
+        .btn-danger {
+            background: linear-gradient(180deg, #3a2d23, #261b13);
+            color: #fff8ef;
+        }
 
         .message {
-            margin-top: 14px;
             padding: 12px 14px;
             border-radius: 16px;
             background: var(--success-soft);
@@ -189,78 +389,92 @@
             border: 1px solid rgba(32, 98, 70, 0.16);
         }
 
-        .progress-shell {
-            margin-top: 16px;
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 14px;
-            border-radius: 999px;
-            background: rgba(47, 36, 28, 0.10);
-            overflow: hidden;
-            border: 1px solid var(--line);
-        }
-
-        .progress-fill {
-            height: 100%;
-            width: 0%;
-            background: linear-gradient(90deg, #f97316, #facc15);
-            transition: width 0.35s ease;
-        }
-
-        .progress-meta {
-            margin-top: 8px;
-            display: flex;
-            justify-content: space-between;
-            gap: 12px;
-            font-size: 0.9rem;
-            color: var(--muted);
-        }
-
-        .grid-stats,
-        .grid-status,
-        .table-grid,
-        .preview-grid {
+        .message-stack {
             display: grid;
-            gap: 16px;
+            gap: 12px;
+        }
+
+        .preview-grid {
+            grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
+            margin-top: 20px;
+            align-items: start;
+        }
+
+        .preview-frame {
+            width: 100%;
+            max-width: 520px;
+            margin: 0 auto;
+            aspect-ratio: 9 / 16;
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            border-radius: 28px;
+            background:
+                linear-gradient(180deg, rgba(44, 35, 25, 0.9), rgba(17, 14, 11, 0.96)),
+                radial-gradient(circle at 50% 12%, rgba(255,255,255,0.08), transparent 20%);
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            box-shadow: inset 0 0 0 1px rgba(255,255,255,0.05);
+        }
+
+        .preview-frame video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .preview-empty {
+            padding: 28px;
+            text-align: center;
+            color: #f8efe2;
+            line-height: 1.5;
+        }
+
+        .mini-stats,
+        .logs {
+            display: grid;
+            gap: 12px;
+        }
+
+        .mini-stats {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        .mini-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248, 239, 229, 0.92));
+        }
+
+        .mini-card .value-text {
+            margin-top: 8px;
+            line-height: 1.45;
         }
 
         .grid-stats {
             grid-template-columns: repeat(6, minmax(0, 1fr));
-            margin-top: 20px;
+            margin-top: 18px;
         }
 
-        .grid-status {
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            margin-top: 26px;
-        }
-
-        .table-grid,
-        .preview-grid {
-            grid-template-columns: 1.2fr 1fr;
-        }
-
-        .preview-grid {
-            margin-top: 26px;
+        .stat {
+            background: linear-gradient(180deg, rgba(255,255,255,0.95), rgba(248, 238, 224, 0.92));
+            min-height: 132px;
         }
 
         .stat-label {
-            font-size: 0.82rem;
+            font-size: 0.78rem;
             text-transform: uppercase;
-            letter-spacing: 0.08em;
+            letter-spacing: 0.09em;
             color: var(--muted);
         }
 
         .stat-value {
-            margin-top: 8px;
-            font-size: 2rem;
+            margin-top: 12px;
+            font-size: clamp(1.9rem, 2.2vw, 2.4rem);
             font-weight: 700;
             line-height: 1;
         }
 
         .section {
-            margin-top: 26px;
+            margin-top: 24px;
         }
 
         .section-head {
@@ -273,13 +487,22 @@
 
         .section-head h2 {
             margin: 0;
-            font-size: 1.5rem;
+            font-size: 1.45rem;
         }
 
         .section-head p,
         .status-card p {
-            margin: 0;
+            margin: 6px 0 0;
             color: var(--muted);
+            line-height: 1.5;
+        }
+
+        .grid-status {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .status-card {
+            background: linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248, 238, 225, 0.92));
         }
 
         .status-top {
@@ -287,61 +510,77 @@
             justify-content: space-between;
             align-items: start;
             gap: 12px;
+            margin-bottom: 12px;
         }
 
         .badge,
         .pill {
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             border-radius: 999px;
             padding: 7px 12px;
-            font-size: 0.82rem;
+            font-size: 0.8rem;
             font-weight: 700;
+            line-height: 1.2;
         }
 
-        .badge-ok { background: var(--success-soft); color: var(--success); }
-        .badge-warn { background: var(--warn-soft); color: var(--warn); }
-        .badge-off { background: var(--danger-soft); color: var(--danger); }
+        .badge-ok {
+            background: var(--success-soft);
+            color: var(--success);
+        }
+
+        .badge-warn {
+            background: var(--warn-soft);
+            color: var(--warn);
+        }
+
+        .badge-off {
+            background: var(--danger-soft);
+            color: var(--danger);
+        }
 
         .pill {
-            background: #f2eadf;
+            background: #f0e6d9;
             color: #5d4f42;
             text-transform: capitalize;
         }
 
-        .preview-frame {
+        .table-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+
+        table {
             width: 100%;
-            aspect-ratio: 9 / 16;
-            border: 1px solid var(--line);
-            border-radius: 24px;
-            background: linear-gradient(180deg, #2b241d, #17120e);
-            overflow: hidden;
-            display: flex;
-            align-items: center;
-            justify-content: center;
+            border-collapse: collapse;
         }
 
-        .preview-frame video {
-            width: 100%;
-            height: 100%;
-            object-fit: cover;
+        th,
+        td {
+            text-align: left;
+            padding: 13px 0;
+            border-bottom: 1px solid var(--line);
+            vertical-align: top;
         }
 
-        .preview-empty {
-            padding: 24px;
-            text-align: center;
-            color: #f8efe2;
+        th {
+            font-size: 0.76rem;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+            color: var(--muted);
         }
 
-        .mini-stats,
-        .logs {
-            display: grid;
-            gap: 12px;
+        td {
+            font-size: 0.95rem;
+            line-height: 1.45;
         }
 
-        .mini-card,
+        tr:last-child td {
+            border-bottom: none;
+        }
+
         .log {
-            padding: 14px 16px;
+            padding: 15px 16px;
             border-radius: 18px;
             border: 1px solid var(--line);
             background: var(--panel-strong);
@@ -352,39 +591,39 @@
             margin-bottom: 6px;
         }
 
-        table {
+        audio {
             width: 100%;
-            border-collapse: collapse;
         }
 
-        th, td {
-            text-align: left;
-            padding: 12px 0;
-            border-bottom: 1px solid var(--line);
-            vertical-align: top;
+        code {
+            font-family: Consolas, "SFMono-Regular", monospace;
+            font-size: 0.92em;
         }
 
-        th {
-            font-size: 0.78rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: var(--muted);
-        }
+        @media (max-width: 1180px) {
+            .hero,
+            .preview-grid,
+            .table-grid {
+                grid-template-columns: 1fr;
+            }
 
-        td {
-            font-size: 0.95rem;
-        }
+            .hero {
+                gap: 18px;
+            }
 
-        tr:last-child td {
-            border-bottom: none;
+            .preview-frame {
+                max-width: 460px;
+            }
         }
 
         @media (max-width: 980px) {
-            .hero,
+            .overview-grid,
+            .snapshot-grid,
             .grid-status,
             .grid-stats,
-            .preview-grid,
-            .table-grid {
+            .mini-stats,
+            .actions,
+            .voice-summary {
                 grid-template-columns: 1fr;
             }
 
@@ -392,25 +631,110 @@
                 grid-template-columns: 1fr;
             }
         }
+
+        @media (max-width: 720px) {
+            .shell {
+                width: min(100% - 20px, 1320px);
+                margin-top: 12px;
+            }
+
+            .hero,
+            .action-card,
+            .table-card,
+            .status-card,
+            .stat,
+            .overview-card,
+            .snapshot-card {
+                border-radius: 22px;
+            }
+
+            .hero {
+                padding: 18px;
+            }
+
+            .hero h1 {
+                font-size: clamp(2.1rem, 11vw, 3rem);
+            }
+
+            .progress-meta,
+            .section-head {
+                flex-direction: column;
+                align-items: start;
+            }
+
+            .status-row {
+                grid-template-columns: 1fr;
+            }
+
+            .preview-frame {
+                border-radius: 22px;
+            }
+        }
     </style>
 </head>
 <body>
     <div class="shell">
         <section class="hero">
-            <div>
-                <h1>DarkBrainScroll Control Room</h1>
-                <p>Monitor generation, automatic social uploads, cleanup, retries, and error logs from one place.</p>
+            <div class="hero-copy">
+                <span class="eyebrow">Automation Dashboard</span>
+                <div>
+                    <h1>DarkBrainScroll Control Room</h1>
+                    <p class="hero-lead">Monitor generation, automatic social uploads, cleanup, retries, preview readiness, provider health, and platform delivery from one place without losing manual control.</p>
+                </div>
+
+                <div class="overview-grid">
+                    <article class="overview-card">
+                        <div class="stat-label">Workflow</div>
+                        <strong>{{ workflow_state|default:"Idle" }}</strong>
+                        <p>{{ latest_project.status_message|default:"Waiting for your next action." }}</p>
+                    </article>
+                    <article class="overview-card">
+                        <div class="stat-label">Latest Project</div>
+                        <strong>{% if latest_project %}#{{ latest_project.id }}{% else %}None{% endif %}</strong>
+                        <p>{% if latest_project %}{{ latest_project.topic.title|truncatechars:72 }}{% else %}Create a project to start the pipeline.{% endif %}</p>
+                    </article>
+                    <article class="overview-card">
+                        <div class="stat-label">Automation</div>
+                        <strong>{% if automation_state.is_enabled %}Live{% else %}Paused{% endif %}</strong>
+                        <p>{% if automation_state.last_cycle_at %}Last cycle {{ automation_state.last_cycle_at|date:"M d, Y H:i" }}.{% else %}Waiting for the first automation cycle.{% endif %}</p>
+                    </article>
+                </div>
+
+                <div class="snapshot-grid">
+                    <article class="snapshot-card">
+                        <div class="stat-label">Pipeline Snapshot</div>
+                        <h3 style="margin-top: 8px;">One queue, preview, upload, and cleanup loop</h3>
+                        <p>The dashboard keeps preview playback, upload controls, logs, provider readiness, and job state visible at the same time so you do not have to jump between screens.</p>
+                    </article>
+                    <article class="snapshot-card">
+                        <div class="stat-label">Current Totals</div>
+                        <div style="margin-top: 12px; display: grid; gap: 10px;">
+                            <div style="display: flex; justify-content: space-between; gap: 12px;"><span class="muted">Ready to upload</span><strong>{{ stats.ready_projects }}</strong></div>
+                            <div style="display: flex; justify-content: space-between; gap: 12px;"><span class="muted">Queued projects</span><strong>{{ stats.queued_projects }}</strong></div>
+                            <div style="display: flex; justify-content: space-between; gap: 12px;"><span class="muted">Recent cleaned</span><strong>{{ stats.disk_clean_projects }}</strong></div>
+                        </div>
+                    </article>
+                </div>
             </div>
+
             <div class="hero-actions">
                 <div class="action-card">
                     <div class="muted">Workflow state</div>
-                    <h3 style="margin: 8px 0 0;">Generate, validate, upload, and clean automatically</h3>
-                    <div style="margin-top: 12px;">
-                        <span id="workflow-badge" class="badge {% if workflow_tone == 'ok' %}badge-ok{% elif workflow_tone == 'warn' %}badge-warn{% else %}badge-off{% endif %}">{{ workflow_state|default:"Idle" }}</span>
-                        <span id="automation-badge" class="badge {% if automation_state.is_enabled %}badge-ok{% else %}badge-off{% endif %}" style="margin-left: 8px;">
-                            {% if automation_state.is_enabled %}Automation Running{% else %}Automation Paused{% endif %}
-                        </span>
+                    <h3 style="margin-top: 8px;">Generate, validate, upload, and clean automatically</h3>
+
+                    <div class="status-row">
+                        <div class="status-chip">
+                            <div class="stat-label">Pipeline</div>
+                            <span id="workflow-badge" class="badge {% if workflow_tone == 'ok' %}badge-ok{% elif workflow_tone == 'warn' %}badge-warn{% else %}badge-off{% endif %}">{{ workflow_state|default:"Idle" }}</span>
+                        </div>
+                        <div class="status-chip">
+                            <div class="stat-label">Automation</div>
+                            <span id="automation-badge" class="badge {% if automation_state.is_enabled %}badge-ok{% else %}badge-off{% endif %}">
+                                {% if automation_state.is_enabled %}Automation Running{% else %}Automation Paused{% endif %}
+                            </span>
+                        </div>
                     </div>
+
                     <div class="progress-shell">
                         <div class="progress-bar">
                             <div id="progress-fill" class="progress-fill" style="width: {{ workflow_progress|default:0 }}%;"></div>
@@ -420,13 +744,15 @@
                             <strong id="progress-value">{{ workflow_progress|default:0 }}%</strong>
                         </div>
                     </div>
-                    <div id="automation-meta" class="muted" style="margin-top: 10px;">
+
+                    <div id="automation-meta" class="muted">
                         {% if automation_state.last_cycle_at %}
                             Last cycle: {{ automation_state.last_cycle_at|date:"M d, Y H:i" }}
                         {% else %}
                             Waiting for the first automation cycle.
                         {% endif %}
                     </div>
+
                     <div class="mode-panel">
                         <form method="post" action="{% url 'set-brainrot-mode' %}">
                             {% csrf_token %}
@@ -443,13 +769,15 @@
                             {% endif %}
                         </div>
                     </div>
+
                     {% if automation_state.last_error %}
-                        <div id="automation-error" class="message" style="background: var(--danger-soft); color: var(--danger); border-color: rgba(152, 59, 54, 0.16);">
+                        <div id="automation-error" class="message" style="margin-top: 18px; background: var(--danger-soft); color: var(--danger); border-color: rgba(152, 59, 54, 0.16);">
                             {{ automation_state.last_error|truncatechars:160 }}
                         </div>
                     {% else %}
-                        <div id="automation-error" class="muted" style="margin-top: 10px;">No automation errors.</div>
+                        <div id="automation-error" class="muted" style="margin-top: 18px;">No automation errors.</div>
                     {% endif %}
+
                     <div class="voice-panel">
                         <div class="muted">Narration voice</div>
                         <h4>Choose the default deep male voice for new videos</h4>
@@ -470,61 +798,71 @@
                                 <button class="btn btn-secondary" type="button" id="play-voice-sample">Play Sample</button>
                                 <button class="btn btn-primary" type="submit">Save Default Voice</button>
                             </div>
-                            <div class="voice-meta">
+                            <div class="voice-summary">
                                 <span class="badge badge-warn" id="voice-current-badge">Current default</span>
                                 <span class="muted" id="voice-description">
                                     {% for voice in voice_options %}{% if selected_voice_name == voice.value %}{{ voice.description }}{% endif %}{% endfor %}
                                 </span>
-                                <audio id="voice-sample-player" preload="none" controls style="max-width: 100%;"></audio>
+                            </div>
+                            <div style="margin-top: 12px;">
+                                <audio id="voice-sample-player" preload="none" controls></audio>
                             </div>
                         </form>
                     </div>
-                    <div class="actions">
-                        <form method="post" action="{% url 'automation-start' %}">
-                            {% csrf_token %}
-                            <button class="btn btn-primary" type="submit">Start Automation</button>
-                        </form>
-                        <form method="post" action="{% url 'automation-pause' %}">
-                            {% csrf_token %}
-                            <button class="btn btn-danger" type="submit">Pause Automation</button>
-                        </form>
-                        <form method="post" action="{% url 'start-new-project' %}">
-                            {% csrf_token %}
-                            <div id="niche-picker" class="niche-picker" {% if automation_state.brainrot_mode %}hidden{% endif %}>
-                                <select name="niche" aria-label="Video niche">
-                                    <option value="">Dark Curiosity</option>
-                                    {% for value, label in niche_options %}
-                                        <option value="{{ value }}">{{ label }}</option>
-                                    {% endfor %}
-                                </select>
-                                <div class="muted" style="margin-top: 6px;">
-                                    This workflow now generates only Dark Curiosity topics built for retention, rewatches, and suspense.
+
+                    <div class="action-stack">
+                        <div class="actions">
+                            <form method="post" action="{% url 'automation-start' %}">
+                                {% csrf_token %}
+                                <button class="btn btn-primary" type="submit">Start Automation</button>
+                            </form>
+                            <form method="post" action="{% url 'automation-pause' %}">
+                                {% csrf_token %}
+                                <button class="btn btn-danger" type="submit">Pause Automation</button>
+                            </form>
+                            <form method="post" action="{% url 'start-new-project' %}">
+                                {% csrf_token %}
+                                <div id="niche-picker" class="niche-picker" {% if automation_state.brainrot_mode %}hidden{% endif %}>
+                                    <select name="niche" aria-label="Video niche">
+                                        <option value="">Dark Curiosity</option>
+                                        {% for value, label in niche_options %}
+                                            <option value="{{ value }}">{{ label }}</option>
+                                        {% endfor %}
+                                    </select>
+                                    <div class="muted" style="margin-top: 6px;">
+                                        This workflow now generates only Dark Curiosity topics built for retention, rewatches, and suspense.
+                                    </div>
                                 </div>
-                            </div>
-                            <button class="btn btn-secondary" type="submit">Create New Video</button>
-                        </form>
-                        <form method="post" action="{% url 'start-generate' %}">
-                            {% csrf_token %}
-                            <button class="btn btn-primary" type="submit">Generate Preview</button>
-                        </form>
-                        <form method="post" action="{% url 'start-upload' %}">
-                            {% csrf_token %}
-                            <button class="btn btn-danger" type="submit">Upload Latest Ready Video</button>
-                        </form>
-                        <form method="post" action="{% url 'run-automation-now' %}">
-                            {% csrf_token %}
-                            <button class="btn btn-secondary" type="submit">Run Automation Now</button>
-                        </form>
-                        <a class="btn btn-secondary" href="/admin/">Open Admin</a>
+                                <button class="btn btn-secondary" type="submit">Create New Video</button>
+                            </form>
+                            <form method="post" action="{% url 'start-generate' %}">
+                                {% csrf_token %}
+                                <button class="btn btn-primary" type="submit">Generate Preview</button>
+                            </form>
+                            <form method="post" action="{% url 'start-upload' %}">
+                                {% csrf_token %}
+                                <button class="btn btn-danger" type="submit">Upload Latest Ready Video</button>
+                            </form>
+                            <form method="post" action="{% url 'run-automation-now' %}">
+                                {% csrf_token %}
+                                <button class="btn btn-secondary" type="submit">Run Automation Now</button>
+                            </form>
+                            <a class="btn btn-secondary" href="/admin/">Open Admin</a>
+                        </div>
                     </div>
-                    {% if messages %}
-                        {% for message in messages %}
-                            <div class="message">{{ message }}</div>
-                        {% endfor %}
-                    {% endif %}
-                    {% if setup_needed %}
-                        <div class="message" style="background: var(--warn-soft); color: var(--warn); border-color: rgba(138, 90, 17, 0.16);">
-                            Database tables are not ready yet. Run <code>python manage.py migrate</code> to unlock project and queue data.
+
+                    {% if messages or setup_needed %}
+                        <div class="message-stack">
+                            {% if messages %}
+                                {% for message in messages %}
+                                    <div class="message">{{ message }}</div>
+                                {% endfor %}
+                            {% endif %}
+                            {% if setup_needed %}
+                                <div class="message" style="background: var(--warn-soft); color: var(--warn); border-color: rgba(138, 90, 17, 0.16);">
+                                    Database tables are not ready yet. Run <code>python manage.py migrate</code> to unlock project and queue data.
+                                </div>
+                            {% endif %}
                         </div>
                     {% endif %}
                 </div>
@@ -563,19 +901,19 @@
                 <div class="mini-stats">
                     <div class="mini-card">
                         <div class="stat-label">Latest Title</div>
-                        <div style="margin-top: 8px; font-weight: 700;">
+                        <div class="value-text" style="font-weight: 700;">
                             {% if latest_project %}{{ latest_project.topic.title }}{% else %}No project yet{% endif %}
                         </div>
                     </div>
                     <div class="mini-card">
                         <div class="stat-label">Status</div>
-                        <div style="margin-top: 8px;">
+                        <div class="value-text">
                             <span id="current-job-badge" class="badge {% if workflow_tone == 'ok' %}badge-ok{% elif workflow_tone == 'warn' %}badge-warn{% else %}badge-off{% endif %}">{{ workflow_state|default:"Idle" }}</span>
                         </div>
                     </div>
                     <div class="mini-card">
                         <div class="stat-label">Video File</div>
-                        <div style="margin-top: 8px;">
+                        <div class="value-text">
                             {% if latest_project and latest_project.video_exists %}
                                 <span id="video-file-badge" class="badge badge-warn">Stored for preview</span>
                             {% elif latest_project %}
@@ -587,7 +925,7 @@
                     </div>
                     <div class="mini-card">
                         <div class="stat-label">Failure</div>
-                        <div id="failure-text" style="margin-top: 8px;" class="muted">
+                        <div id="failure-text" class="value-text muted">
                             {% if latest_project and latest_project.failure_reason %}
                                 {{ latest_project.failure_reason|truncatechars:120 }}
                             {% else %}
@@ -903,7 +1241,7 @@
                 }
                 if (automationError) {
                     automationError.className = data.automation_last_error ? "message" : "muted";
-                    automationError.style.marginTop = "10px";
+                    automationError.style.marginTop = "18px";
                     automationError.textContent = data.automation_last_error || "No automation errors.";
                 }
 
