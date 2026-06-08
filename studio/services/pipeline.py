@@ -44,6 +44,8 @@ PROVIDER_BUDGET_ERROR_MARKERS = (
 NON_RETRYABLE_UPLOAD_ERROR_MARKERS = (
     "invalid oauth access token",
     "cannot parse access token",
+    "access token has expired",
+    "oauthexception",
     "instagram username/password fallback is not configured",
     "bad password",
     "challenge_required",
@@ -384,6 +386,26 @@ def _schedule_retry(job: PublishJob, exc: Exception) -> PublishJob:
         log_event("publish.failed", str(exc), level="error", project=project, publish_job=job)
         delete_project_record(project, reason="final failure")
     return job
+
+
+def _fail_pending_jobs_for_project(project: VideoProject, reason: str) -> int:
+    pending_jobs = list(
+        project.publish_jobs.filter(
+            status__in=[JobStatus.QUEUED, JobStatus.GENERATING, JobStatus.READY, JobStatus.POSTING]
+        )
+    )
+    if not pending_jobs:
+        return 0
+
+    now = timezone.now()
+    updated_count = 0
+    for job in pending_jobs:
+        job.status = JobStatus.FAILED
+        job.last_error = reason
+        job.finished_at = now
+        job.save(update_fields=["status", "last_error", "finished_at", "updated_at"])
+        updated_count += 1
+    return updated_count
 
 
 def get_enabled_platforms() -> list[str]:
@@ -827,6 +849,9 @@ def _publish_job(job: PublishJob, now=None) -> PublishJob | None:
         if job.project.status not in [JobStatus.READY, JobStatus.POSTING, JobStatus.POSTED]:
             generate_project_media(job.project)
         job.project.refresh_from_db()
+        if job.project.output_file and Path(job.project.output_file).exists():
+            _mark_project_ready_if_output_exists(job.project)
+            job.project.refresh_from_db()
         if job.project.status != JobStatus.READY or job.project.progress_percent < 100 or not job.project.output_file:
             raise RuntimeError("Upload blocked because the video did not finish generating successfully.")
         recent_post = _recent_channel_post(job.channel, now=now)
@@ -948,6 +973,7 @@ def _run_generation_task(project_id: int) -> None:
         project.status_message = str(exc)
         project.progress_percent = 100
         project.save(update_fields=["status", "failure_reason", "status_message", "progress_percent", "updated_at"])
+        _fail_pending_jobs_for_project(project, str(exc))
         purge_project_media(project)
         log_event("project.render_failed", str(exc), level="error", project=project)
 
@@ -998,36 +1024,37 @@ def start_upload_async(project: VideoProject) -> None:
 
 def dispatch_due_work() -> PublishJob | None:
     now = timezone.now()
-    job = (
+    due_jobs = list(
         PublishJob.objects.select_related("project", "channel")
         .filter(status=JobStatus.QUEUED, scheduled_for__lte=now)
         .order_by("scheduled_for", "order_index", "created_at")
-        .first()
     )
-    if not job:
+    if not due_jobs:
         return None
 
-    if not is_platform_enabled(job.channel.platform):
-        return _publish_job(job, now=now)
+    for job in due_jobs:
+        if not is_platform_enabled(job.channel.platform):
+            return _publish_job(job, now=now)
 
-    blockers = PublishJob.objects.filter(
-        project=job.project,
-        order_index__lt=job.order_index,
-    ).exclude(status=JobStatus.POSTED)
-    if blockers.exists():
-        return None
+        blockers = PublishJob.objects.filter(
+            project=job.project,
+            order_index__lt=job.order_index,
+        ).exclude(status=JobStatus.POSTED)
+        if blockers.exists():
+            continue
 
-    project = job.project
-    if project.status == JobStatus.GENERATING or project.status == JobStatus.POSTING:
+        project = job.project
+        if project.status == JobStatus.GENERATING or project.status == JobStatus.POSTING:
+            return job
+
+        output_ready = bool(project.output_file and Path(project.output_file).exists())
+        if project.status == JobStatus.READY and output_ready:
+            start_upload_async(project)
+            return job
+
+        start_generation_async(project)
         return job
-
-    output_ready = bool(project.output_file and Path(project.output_file).exists())
-    if project.status == JobStatus.READY and output_ready:
-        start_upload_async(project)
-        return job
-
-    start_generation_async(project)
-    return job
+    return None
 
 
 def process_due_work() -> dict:
