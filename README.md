@@ -59,7 +59,8 @@ For Instagram Reels publishing:
 1. Put `INSTAGRAM_TOKEN` and `INSTAGRAM_ACCOUNT_ID` into `.env`
 2. Set `APP_BASE_URL` to a public URL Meta can reach
 3. Set `ENABLE_INSTAGRAM_UPLOAD=True`
-4. Restart Django
+4. Optional but recommended: also set `INSTAGRAM_USER_NAME` or `INSTAGRAM_USERNAME`, plus `INSTAGRAM_PASSWORD`, so the app can fall back to a saved Instagram session if the Graph API token expires or is rejected
+5. Restart Django
 
 ## Environment variables
 

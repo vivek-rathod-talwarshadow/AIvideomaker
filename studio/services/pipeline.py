@@ -41,6 +41,15 @@ PROVIDER_BUDGET_ERROR_MARKERS = (
     "resource has been exhausted",
 )
 
+NON_RETRYABLE_UPLOAD_ERROR_MARKERS = (
+    "invalid oauth access token",
+    "cannot parse access token",
+    "instagram username/password fallback is not configured",
+    "bad password",
+    "challenge_required",
+    "two-factor",
+)
+
 
 def _project_video_dimensions() -> tuple[int, int]:
     width = max(360, int(getattr(settings, "DEFAULT_VIDEO_WIDTH", 720)))
@@ -283,7 +292,9 @@ def _youtube_limit_reached() -> bool:
 
 def _should_retry_after_exception(exc: Exception) -> bool:
     normalized = str(exc).lower()
-    return "youtube daily upload limit reached" not in normalized
+    if "youtube daily upload limit reached" in normalized:
+        return False
+    return not any(marker in normalized for marker in NON_RETRYABLE_UPLOAD_ERROR_MARKERS)
 
 
 def _is_provider_budget_exhausted_error(exc: Exception) -> bool:
