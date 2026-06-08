@@ -10,11 +10,15 @@ from django.conf import settings
 from .utils import truncate_text
 
 
+def _clean_env_value(value) -> str:
+    return "".join(str(value or "").split()).strip()
+
+
 def instagram_upload_configured() -> bool:
     return all(
         [
-            getattr(settings, "INSTAGRAM_TOKEN", ""),
-            getattr(settings, "INSTAGRAM_ACCOUNT_ID", ""),
+            _clean_env_value(getattr(settings, "INSTAGRAM_TOKEN", "")),
+            _clean_env_value(getattr(settings, "INSTAGRAM_ACCOUNT_ID", "")),
         ]
     )
 
@@ -94,7 +98,7 @@ def _wait_for_container_ready(container_id: str) -> None:
     status_url = f"{_graph_api_base()}/{container_id}"
     params = {
         "fields": "status_code",
-        "access_token": settings.INSTAGRAM_TOKEN,
+        "access_token": _clean_env_value(settings.INSTAGRAM_TOKEN),
     }
 
     while time.time() < deadline:
@@ -113,8 +117,10 @@ def upload_instagram_reel(project) -> str:
     if not instagram_upload_configured():
         raise RuntimeError("Instagram Graph API credentials are missing.")
 
-    container_url = f"{_graph_api_base()}/{settings.INSTAGRAM_ACCOUNT_ID}/media"
-    publish_url = f"{_graph_api_base()}/{settings.INSTAGRAM_ACCOUNT_ID}/media_publish"
+    access_token = _clean_env_value(getattr(settings, "INSTAGRAM_TOKEN", ""))
+    account_id = _clean_env_value(getattr(settings, "INSTAGRAM_ACCOUNT_ID", ""))
+    container_url = f"{_graph_api_base()}/{account_id}/media"
+    publish_url = f"{_graph_api_base()}/{account_id}/media_publish"
     preview_url = _build_preview_url(project)
 
     create_payload = {
@@ -122,7 +128,7 @@ def upload_instagram_reel(project) -> str:
         "video_url": preview_url,
         "caption": build_instagram_caption(project),
         "share_to_feed": "true" if getattr(settings, "INSTAGRAM_SHARE_TO_FEED", True) else "false",
-        "access_token": settings.INSTAGRAM_TOKEN,
+        "access_token": access_token,
     }
     create_response = _graph_post(container_url, create_payload)
     creation_id = str(create_response.get("id") or "").strip()
@@ -135,7 +141,7 @@ def upload_instagram_reel(project) -> str:
         publish_url,
         {
             "creation_id": creation_id,
-            "access_token": settings.INSTAGRAM_TOKEN,
+            "access_token": access_token,
         },
     )
     published_id = str(publish_response.get("id") or publish_response.get("post_id") or "").strip()

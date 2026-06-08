@@ -626,12 +626,14 @@ def create_brainrot_project(automation: bool = False) -> VideoProject:
 
 def ensure_publish_jobs(project: VideoProject) -> list[PublishJob]:
     existing_jobs = list(project.publish_jobs.select_related("channel").order_by("order_index", "created_at"))
-    if existing_jobs:
-        return existing_jobs
-
     enabled_platforms = get_enabled_platforms()
-    jobs: list[PublishJob] = []
+    existing_platforms = {job.channel.platform for job in existing_jobs}
+    jobs = list(existing_jobs)
+    created_jobs = False
+
     for order_index, platform in enumerate(enabled_platforms, start=1):
+        if platform in existing_platforms:
+            continue
         channel = get_or_create_default_channel(platform)
         jobs.append(
             PublishJob.objects.create(
@@ -641,7 +643,10 @@ def ensure_publish_jobs(project: VideoProject) -> list[PublishJob]:
                 order_index=order_index,
             )
         )
-    if jobs:
+        created_jobs = True
+
+    if created_jobs:
+        jobs = list(project.publish_jobs.select_related("channel").order_by("order_index", "created_at"))
         log_event("publish.jobs_created", "Missing publish jobs were recreated automatically.", project=project)
     return jobs
 
