@@ -7,7 +7,13 @@ from django.utils import timezone
 
 from studio.enums import ContentNiche, JobStatus, PlatformType
 from studio.models import ChannelProfile, PublishJob, VideoProject, ViralTopic
-from studio.services.pipeline import _publish_job, _run_generation_task, create_longform_project_if_needed, dispatch_due_work
+from studio.services.pipeline import (
+    _publish_job,
+    _run_generation_task,
+    create_longform_project_if_needed,
+    dispatch_due_work,
+    process_due_work,
+)
 from studio.services.instagram import instagram_upload_configured, upload_instagram_reel
 from studio.services.topic_generator import _validate_topic_payload
 from studio.services.youtube import build_youtube_metadata
@@ -263,3 +269,24 @@ class PipelineQueueTests(TestCase):
         self.assertEqual(instagram_job.status, JobStatus.SKIPPED)
         self.assertEqual(project.status, JobStatus.POSTED)
         delete_project_record.assert_called_once()
+
+    def test_process_due_work_uses_short_and_longform_project_ids_without_name_error(self) -> None:
+        with patch("studio.services.pipeline.acquire_lock", return_value=True), patch(
+            "studio.services.pipeline.release_lock"
+        ), patch("studio.services.pipeline.cleanup_orphaned_project_media", return_value=0), patch(
+            "studio.services.pipeline.cleanup_completed_projects", return_value=0
+        ), patch(
+            "studio.services.pipeline.dispatch_due_work", return_value=None
+        ), patch(
+            "studio.services.pipeline.create_daily_project_if_needed", return_value=self._project("Shorts project")
+        ) as create_short, patch(
+            "studio.services.pipeline.create_longform_project_if_needed", return_value=self._project("Longform project")
+        ) as create_long:
+            result = process_due_work()
+
+        self.assertTrue(result["ok"])
+        self.assertIsNotNone(result["created_project_id"])
+        self.assertIsNotNone(result["created_shorts_project_id"])
+        self.assertIsNotNone(result["created_longform_project_id"])
+        create_short.assert_called_once()
+        create_long.assert_called_once()

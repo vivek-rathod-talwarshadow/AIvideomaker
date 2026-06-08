@@ -1213,7 +1213,7 @@ def process_due_work() -> dict:
             "automation.cycle_complete",
             "Automation cycle finished.",
             payload={
-                "created_project_id": getattr(project, "id", None),
+                "created_project_id": getattr(shorts_project or longform_project, "id", None),
                 "created_shorts_project_id": getattr(shorts_project, "id", None),
                 "created_longform_project_id": getattr(longform_project, "id", None),
                 "processed_job_id": getattr(job, "id", None),
