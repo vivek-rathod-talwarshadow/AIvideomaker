@@ -9,6 +9,7 @@ from studio.enums import ContentNiche, JobStatus, PlatformType
 from studio.models import ChannelProfile, PublishJob, VideoProject, ViralTopic
 from studio.services.pipeline import _publish_job, _run_generation_task, create_longform_project_if_needed, dispatch_due_work
 from studio.services.instagram import instagram_upload_configured, upload_instagram_reel
+from studio.services.topic_generator import _validate_topic_payload
 from studio.services.youtube import build_youtube_metadata
 
 
@@ -186,6 +187,32 @@ class PipelineQueueTests(TestCase):
         self.assertNotIn("#Shorts", metadata["snippet"]["title"])
         self.assertNotIn("youtubeShorts", metadata["snippet"]["tags"])
         self.assertIn("mystery", " ".join(metadata["snippet"]["tags"]).lower())
+
+    def test_dark_curiosity_category_is_normalized_instead_of_failing(self) -> None:
+        payload = {
+            "topics": [
+                {
+                    "category": "Unexplained Mystery",
+                    "topic_formula": "mystery + danger + real event",
+                    "title": "The Cave Radio That Should Not Exist",
+                    "intro": "A dead radio led explorers underground.",
+                    "bullets": ["Beat one", "Beat two", "Beat three", "Beat four", "Beat five", "Beat six"],
+                    "cta": "No one knows who left it there.",
+                    "hashtags": ["#darkcuriosity"],
+                    "asset_packs": ["abandoned places"],
+                    "visuals": ["cave entrance", "radio room", "tunnel", "map", "signal", "artifact", "dark cave", "mystery ending"],
+                    "pixabay_keywords": [
+                        "mystery", "cave", "radio", "tunnel", "artifact", "signal",
+                        "underground", "dark", "ancient", "ruins", "map", "explorer",
+                    ],
+                    "viral_scores": {"curiosity": 9, "shock": 8, "retention": 8, "shareability": 8},
+                }
+            ]
+        }
+
+        normalized = _validate_topic_payload(payload, ContentNiche.DARK_CURIOSITY, "openai", "test-model")
+
+        self.assertEqual(normalized["category"], "Unexplained Mysteries")
 
     @override_settings(
         INSTAGRAM_TOKEN="bad-token",

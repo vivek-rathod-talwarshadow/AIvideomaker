@@ -38,6 +38,27 @@ DARK_CURIOSITY_CATEGORIES = [
     "Unsolved Events",
 ]
 
+DARK_CURIOSITY_CATEGORY_ALIASES = {
+    "unexplained mystery": "Unexplained Mysteries",
+    "unexplained mysteries": "Unexplained Mysteries",
+    "ancient secret": "Ancient Secrets",
+    "ancient secrets": "Ancient Secrets",
+    "strange science": "Strange Science",
+    "hidden history": "Hidden History",
+    "dangerous place": "Dangerous Places",
+    "dangerous places": "Dangerous Places",
+    "weird animal": "Weird Animals",
+    "weird animals": "Weird Animals",
+    "space mystery": "Space Mysteries",
+    "space mysteries": "Space Mysteries",
+    "internet mystery": "Internet Mysteries",
+    "internet mysteries": "Internet Mysteries",
+    "lost civilization": "Lost Civilizations",
+    "lost civilizations": "Lost Civilizations",
+    "unsolved event": "Unsolved Events",
+    "unsolved events": "Unsolved Events",
+}
+
 DARK_CURIOSITY_RULES = (
     "Primary goal:\n"
     "- Maximize retention, curiosity, rewatches, shares, and comments.\n"
@@ -239,6 +260,26 @@ def _recently_used_titles(niche: str | None, limit: int = 40) -> list[str]:
 
 def _normalize_similarity_text(value: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", str(value).lower()))
+
+
+def _normalize_dark_curiosity_category(category: str) -> str:
+    cleaned = truncate_text(" ".join(str(category or "").split()), 80)
+    if not cleaned:
+        return DARK_CURIOSITY_CATEGORIES[0]
+    if cleaned in DARK_CURIOSITY_CATEGORIES:
+        return cleaned
+
+    normalized = _normalize_similarity_text(cleaned)
+    if normalized in DARK_CURIOSITY_CATEGORY_ALIASES:
+        return DARK_CURIOSITY_CATEGORY_ALIASES[normalized]
+
+    for candidate in DARK_CURIOSITY_CATEGORIES:
+        candidate_normalized = _normalize_similarity_text(candidate)
+        if normalized == candidate_normalized:
+            return candidate
+        if normalized in candidate_normalized or candidate_normalized in normalized:
+            return candidate
+    return DARK_CURIOSITY_CATEGORIES[0]
 
 
 def _tokenize_similarity_text(value: str) -> set[str]:
@@ -831,8 +872,8 @@ def _validate_topic_payload(
     bullets = _normalize_bullets(first_topic.get("bullets", []), limit=bullet_limit)
     if not title or not intro or not cta or len(bullets) < minimum_bullets:
         raise RuntimeError("Content generator returned incomplete topic content.")
-    if niche == str(ContentNiche.DARK_CURIOSITY) and category not in DARK_CURIOSITY_CATEGORIES:
-        raise RuntimeError("Dark Curiosity generator returned an invalid category.")
+    if niche == str(ContentNiche.DARK_CURIOSITY):
+        category = _normalize_dark_curiosity_category(category)
 
     visuals = _normalize_visuals(first_topic.get("visuals", []), expected_count=len(bullets) + 2)
     pixabay_keywords = _expand_pixabay_keywords(
