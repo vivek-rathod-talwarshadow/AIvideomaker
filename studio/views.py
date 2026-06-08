@@ -118,7 +118,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "recent_logs": [],
         "automation_state": automation_state,
         "voice_options": voice_options,
-        "niche_options": ContentNiche.choices,
+        "niche_options": [(ContentNiche.DARK_CURIOSITY, ContentNiche.DARK_CURIOSITY.label)],
         "selected_voice_name": resolve_voice_name(automation_state.default_voice_name),
         "stats": {
             "total_projects": 0,
@@ -333,7 +333,7 @@ def set_brainrot_mode(request: HttpRequest) -> HttpResponse:
 
     enabled = str(request.POST.get("brainrot_mode") or "").strip().lower() in {"1", "true", "on", "yes"}
     update_brainrot_mode(enabled)
-    messages.success(request, "Brainrot mode enabled globally." if enabled else "Brainrot mode disabled globally.")
+    messages.success(request, "Dark Curiosity mode enabled globally." if enabled else "Dark Curiosity mode disabled globally.")
     return redirect("dashboard")
 
 
@@ -361,7 +361,7 @@ def start_new_project(request: HttpRequest) -> HttpResponse:
         return redirect("dashboard")
 
     if brainrot_mode:
-        messages.success(request, f"Brainrot project #{project.id} created and generation started: {project.topic.title}")
+        messages.success(request, f"Dark Curiosity project #{project.id} created and generation started: {project.topic.title}")
     else:
         messages.success(request, f"Created project #{project.id}: {project.topic.title}")
     return redirect("dashboard")
@@ -379,14 +379,14 @@ def start_brainrot_project(request: HttpRequest) -> HttpResponse:
     except Exception as exc:
         log_event(
             "project.create_failed",
-            "Brainrot video creation failed from dashboard.",
+            "Dark Curiosity video creation failed from dashboard.",
             level="error",
             payload={"error": str(exc), "mode": "brainrot"},
         )
-        messages.error(request, f"Could not start the brainrot video flow: {exc}")
+        messages.error(request, f"Could not start the Dark Curiosity video flow: {exc}")
         return redirect("dashboard")
 
-    messages.success(request, f"Brainrot project #{project.id} created and generation started: {project.topic.title}")
+    messages.success(request, f"Dark Curiosity project #{project.id} created and generation started: {project.topic.title}")
     return redirect("dashboard")
 
 

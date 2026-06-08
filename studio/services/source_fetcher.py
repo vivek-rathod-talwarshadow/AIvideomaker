@@ -22,6 +22,7 @@ SLIDE_BACKGROUNDS = [
 ]
 USER_AGENT = "DarkBrainScrollBot/1.0"
 NICHE_QUERY_HINTS = {
+    "dark-curiosity": ["abandoned place", "mysterious ruins", "dark ocean", "space signal", "ancient artifact"],
     "facts": ["science laboratory", "brain scan", "space galaxy", "microscope research"],
     "tech": ["technology ai", "computer code", "cyber interface", "robotics lab"],
     "money": ["money finance", "stock market", "saving cash", "wallet closeup"],
@@ -34,6 +35,7 @@ NICHE_QUERY_HINTS = {
     "crime": ["detective board", "city alley night", "interrogation room", "police evidence wall"],
 }
 NICHE_PROVIDER_ORDER = {
+    "dark-curiosity": ("pexels", "pixabay", "wikimedia"),
     "animals": ("pexels", "pixabay", "wikimedia"),
     "motivation": ("pexels", "pixabay", "wikimedia"),
     "glam": ("pexels", "pixabay", "wikimedia"),
@@ -262,6 +264,7 @@ GENERIC_FALLBACK_VIDEO_SOURCES = (
     "https://samplelib.com/mp4/sample-30s.mp4",
 )
 REGULAR_VIDEO_QUERY_HINTS = {
+    "dark-curiosity": ["abandoned building footage", "ancient ruins footage", "deep ocean footage", "space signal animation", "mysterious forest footage"],
     "facts": ["science laboratory footage", "space documentary footage", "microscope research footage", "brain scan footage"],
     "tech": ["ai interface footage", "computer code screen footage", "robotics lab footage", "technology office footage"],
     "money": ["luxury city lifestyle footage", "stock market screen footage", "cash counting footage", "business office footage"],
@@ -371,6 +374,7 @@ def _build_scene_queries(project: VideoProject, scene: dict) -> list[str]:
     keyword_phrase = _scene_keyword_phrase(scene_text)
     topic_keywords = _topic_keyword_phrase(project)
     asset_packs = _asset_pack_terms(project)
+    pixabay_keywords = _topic_note_terms(project, "pixabay-keyword:", limit=6)
     candidates = [
         visual_hint,
         f"{visual_hint} realistic photo" if visual_hint else "",
@@ -390,6 +394,7 @@ def _build_scene_queries(project: VideoProject, scene: dict) -> list[str]:
     for pack in asset_packs:
         candidates.append(f"{pack} {keyword_phrase}".strip())
         candidates.append(f"{pack} {visual_hint}".strip())
+    candidates.extend(pixabay_keywords)
     candidates.extend(NICHE_QUERY_HINTS.get(project.niche, []))
     queries: list[str] = []
     seen: set[str] = set()
@@ -607,9 +612,13 @@ def _is_brainrot_video_project(project: VideoProject) -> bool:
 
 
 def _video_search_terms(project: VideoProject, limit: int = 8) -> list[str]:
+    return _topic_note_terms(project, "video-search:", limit=limit)
+
+
+def _topic_note_terms(project: VideoProject, prefix: str, limit: int = 8) -> list[str]:
     terms: list[str] = []
     for note in project.topic.source_notes or []:
-        if not str(note).startswith("video-search:"):
+        if not str(note).startswith(prefix):
             continue
         value = str(note).split(":", 1)[1].strip()
         if value and value.lower() not in {item.lower() for item in terms}:
@@ -641,6 +650,7 @@ def _build_regular_video_scene_queries(project: VideoProject, scene: dict) -> li
     visual_hint = str(scene.get("visual_hint") or "").strip()
     scene_text = str(scene.get("text") or "").strip()
     keyword_phrase = _scene_keyword_phrase(scene_text, max_words=8)
+    pixabay_keywords = _topic_note_terms(project, "pixabay-keyword:", limit=8)
     candidates = [
         visual_hint,
         f"{visual_hint} footage" if visual_hint else "",
@@ -649,6 +659,8 @@ def _build_regular_video_scene_queries(project: VideoProject, scene: dict) -> li
         f"{keyword_phrase} footage" if keyword_phrase else "",
         f"{project.niche} {keyword_phrase} footage" if keyword_phrase else "",
         f"{project.topic.title} documentary footage" if len(project.topic.title.split()) <= 8 else "",
+        *pixabay_keywords,
+        *_video_search_terms(project, limit=6),
         *REGULAR_VIDEO_QUERY_HINTS.get(project.niche, []),
         "vertical stock video",
         "documentary footage",

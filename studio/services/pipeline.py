@@ -9,7 +9,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from studio.enums import JobStatus, PlatformType
+from studio.enums import ContentNiche, JobStatus, PlatformType
 from studio.models import AutomationState, ChannelProfile, EventLog, PublishJob, SchedulerLock, VideoProject, ViralTopic
 from .logging_service import log_event
 from .music import generate_background_music
@@ -23,16 +23,7 @@ from .voiceover import DEFAULT_VOICE_NAME, generate_voiceover, resolve_voice_nam
 
 
 AUTOMATION_NICHE_ORDER = (
-    "glam",
-    "celebrity",
-    "reddit",
-    "psychology",
-    "theory",
-    "crime",
-    "money",
-    "ai",
-    "business",
-    "facts",
+    ContentNiche.DARK_CURIOSITY,
 )
 
 
@@ -138,6 +129,25 @@ def _ensure_output_fingerprint(project: VideoProject) -> str:
     project.output_fingerprint = fingerprint
     project.save(update_fields=["output_fingerprint", "updated_at"])
     return fingerprint
+
+
+def _mark_project_ready_if_output_exists(project: VideoProject) -> bool:
+    output_path = Path(project.output_file) if project.output_file else None
+    if not output_path or not output_path.exists():
+        return False
+    changed_fields: list[str] = ["updated_at"]
+    if project.status != JobStatus.READY:
+        project.status = JobStatus.READY
+        changed_fields.append("status")
+    if project.progress_percent < 100:
+        project.progress_percent = 100
+        changed_fields.append("progress_percent")
+    ready_message = "Preview ready for upload."
+    if project.status_message != ready_message:
+        project.status_message = ready_message
+        changed_fields.append("status_message")
+    project.save(update_fields=changed_fields)
+    return True
 
 
 def _channel_upload_gap_minutes(channel: ChannelProfile) -> int:
@@ -515,7 +525,7 @@ def create_daily_project_if_needed() -> VideoProject | None:
 
 
 def create_project(niche: str = "") -> VideoProject:
-    niche = niche or _select_automation_niche()
+    niche = str(ContentNiche.DARK_CURIOSITY)
     topic = build_ai_topic(niche)
     duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
     target_width, target_height = _project_video_dimensions()
@@ -564,7 +574,7 @@ def create_project(niche: str = "") -> VideoProject:
 
 def create_brainrot_project(automation: bool = False) -> VideoProject:
     topic = build_brainrot_video_topic()
-    duration_seconds = max(90, min(180, estimate_duration_seconds(topic.script, topic.scene_plan) + 36))
+    duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
     target_width, target_height = _project_video_dimensions()
     default_voice_name = resolve_voice_name(get_automation_state().default_voice_name)
     project = VideoProject.objects.create(
@@ -577,7 +587,7 @@ def create_brainrot_project(automation: bool = False) -> VideoProject:
         content_signature=stable_hash([topic.niche, topic.title.strip().lower(), " ".join(topic.script.lower().split())]),
         duration_seconds=duration_seconds,
         progress_percent=5,
-        status_message="Brainrot project created and waiting to generate.",
+        status_message="Dark Curiosity project created and waiting to generate.",
         caption_style={
             "font_size": 60,
             "stroke": 4,
@@ -585,7 +595,7 @@ def create_brainrot_project(automation: bool = False) -> VideoProject:
             "text_color": "#FFFFFF",
             "position": "bottom-third",
             "brand_name": settings.CHANNEL_BRAND_NAME,
-            "render_mode": "brainrot-video",
+            "render_mode": "video-montage",
         },
     )
     fetch_scene_assets(project)
@@ -603,10 +613,10 @@ def create_brainrot_project(automation: bool = False) -> VideoProject:
         project.failure_reason = "No platforms are enabled."
         project.save(update_fields=["status", "failure_reason", "updated_at"])
     if automation:
-        log_event("automation.project_queued", "Brainrot project queued for automatic generation and upload.", project=project)
+        log_event("automation.project_queued", "Dark Curiosity project queued for automatic generation and upload.", project=project)
     log_event(
         "project.created",
-        "Brainrot video project generated." if automation else "Brainrot video project generated from dashboard.",
+        "Dark Curiosity video project generated." if automation else "Dark Curiosity video project generated from dashboard.",
         project=project,
         payload={"title": project.topic.title, "niche": project.niche, "automation": automation, "mode": "brainrot"},
     )
@@ -667,8 +677,13 @@ def generate_project_media(project: VideoProject) -> None:
         set_project_progress(project, 75, "Rendering video montage...")
         log_event("project.render_started", "Rendering stock-footage video with captions.", project=project)
     render_slideshow_video(project, progress_callback=lambda percent, message: set_project_progress(project, percent, message))
-    _ensure_output_fingerprint(project)
-    set_project_progress(project, 100, "Preview ready for upload.")
+    if not _mark_project_ready_if_output_exists(project):
+        raise RuntimeError("Render completed without creating a final video file.")
+    try:
+        _ensure_output_fingerprint(project)
+    except Exception as exc:
+        log_event("project.fingerprint_failed", str(exc), level="error", project=project)
+    _mark_project_ready_if_output_exists(project)
     log_event("project.rendered", "Project assets and video generated.", project=project)
 
 
@@ -904,6 +919,8 @@ def _run_generation_task(project_id: int) -> None:
     if not project:
         return
     try:
+        if _mark_project_ready_if_output_exists(project):
+            return
         generate_project_media(project)
         state = get_automation_state()
         if state.is_enabled and state.auto_upload:

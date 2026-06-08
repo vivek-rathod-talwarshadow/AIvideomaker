@@ -2,6 +2,7 @@ from django.db import models
 
 
 class ContentNiche(models.TextChoices):
+    DARK_CURIOSITY = "dark-curiosity", "Dark Curiosity"
     FACTS = "facts", "Facts"
     MOTIVATION = "motivation", "Motivation"
     TECH = "tech", "Tech Facts"

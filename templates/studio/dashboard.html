@@ -432,12 +432,12 @@
                             {% csrf_token %}
                             <label class="inline-toggle">
                                 <input type="checkbox" name="brainrot_mode" value="1" {% if automation_state.brainrot_mode %}checked{% endif %} onchange="this.form.submit()">
-                                Brainrot Mode
+                                Dark Curiosity Mode
                             </label>
                         </form>
                         <div class="muted" style="margin-top: 8px;">
                             {% if automation_state.brainrot_mode %}
-                                Brainrot mode is active globally. New projects and automation runs will create brainrot video montages only.
+                                Dark Curiosity mode is active globally. New projects and automation runs will create dark mystery shorts only.
                             {% else %}
                                 Regular mode is active globally. New projects and automation runs will create standard video montage projects.
                             {% endif %}
@@ -492,13 +492,13 @@
                             {% csrf_token %}
                             <div id="niche-picker" class="niche-picker" {% if automation_state.brainrot_mode %}hidden{% endif %}>
                                 <select name="niche" aria-label="Video niche">
-                                    <option value="">Auto Pick Best Niche</option>
+                                    <option value="">Dark Curiosity</option>
                                     {% for value, label in niche_options %}
                                         <option value="{{ value }}">{{ label }}</option>
                                     {% endfor %}
                                 </select>
                                 <div class="muted" style="margin-top: 6px;">
-                                    Turn Brainrot Mode off to choose Reddit story, horror story, AI money, motivation, psychology, theory, crime, and more.
+                                    This workflow now generates only Dark Curiosity topics built for retention, rewatches, and suspense.
                                 </div>
                             </div>
                             <button class="btn btn-secondary" type="submit">Create New Video</button>

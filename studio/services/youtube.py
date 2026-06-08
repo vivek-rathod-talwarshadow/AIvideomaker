@@ -79,6 +79,7 @@ def build_youtube_metadata(project) -> dict:
 
     title = truncate_text(f"{project.topic.title} | {settings.CHANNEL_BRAND_NAME} #Shorts", 95)
     niche_descriptions = {
+        "dark-curiosity": "dark curiosity, unexplained mysteries, and suspense-driven shorts",
         "glam": "scroll-stopping glam, dance, and creator-style shorts",
         "celebrity": "celebrity moments, glam reactions, and social buzz shorts",
         "reddit": "POV drama and story-driven shorts",
