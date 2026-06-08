@@ -20,6 +20,11 @@ JSON_ONLY_SYSTEM_PROMPT = (
     "Return valid JSON only. No markdown fences, no commentary."
 )
 
+LONGFORM_JSON_ONLY_SYSTEM_PROMPT = (
+    "You create viral long-form YouTube video topics. "
+    "Return valid JSON only. No markdown fences, no commentary."
+)
+
 DARK_CURIOSITY_CATEGORIES = [
     "Unexplained Mysteries",
     "Ancient Secrets",
@@ -292,6 +297,17 @@ def estimate_duration_seconds(script: str, scene_plan: list[dict] | None = None)
     return max(35, min(narration_seconds + 1, 50))
 
 
+def estimate_longform_duration_seconds(script: str, scene_plan: list[dict] | None = None) -> int:
+    words = max(len(script.split()), 1)
+    narration_seconds = ceil(words / 2.55)
+    minimum = max(120, int(getattr(settings, "LONGFORM_MIN_DURATION_SECONDS", 180)))
+    maximum = max(minimum, int(getattr(settings, "LONGFORM_MAX_DURATION_SECONDS", 300)))
+    if scene_plan:
+        scene_seconds = sum(max(int(scene.get("duration", 0) or 0), 6) for scene in scene_plan)
+        narration_seconds = max(narration_seconds, scene_seconds)
+    return max(minimum, min(narration_seconds + 2, maximum))
+
+
 def _scene_duration(text: str, is_intro: bool = False, is_cta: bool = False) -> int:
     word_count = len(text.split())
     duration = max(3, min(7, ceil(word_count / 3.1)))
@@ -398,6 +414,52 @@ def _brainrot_video_prompt() -> str:
     return _topic_prompt(str(ContentNiche.DARK_CURIOSITY))
 
 
+def _longform_topic_prompt(niche: str) -> str:
+    recent_titles = _recently_used_titles(None, limit=20)
+    recent_briefs = _recent_topic_briefs(None, limit=12)
+    local_today = timezone.localtime(timezone.now()).strftime("%B %d, %Y")
+    prompt = f"Create 1 original Dark Curiosity long-form YouTube video topic for {local_today}.\n\n"
+    prompt += "Rules:\n"
+    prompt += "- Stay fully inside the Dark Curiosity niche.\n"
+    prompt += "- The final spoken script must feel built for a 3 to 5 minute horizontal YouTube video.\n"
+    prompt += "- Open with a strong hook in the first 10 seconds.\n"
+    prompt += "- Structure the story as a layered mystery with rising stakes, evidence, twists, and an unresolved ending.\n"
+    prompt += "- Use a documentary storytelling tone, not listicle filler.\n"
+    prompt += "- Keep each spoken beat concise, vivid, and easy to narrate.\n"
+    prompt += "- Return 12 to 18 body beats so the edit has enough visual variety.\n"
+    prompt += "- Include concrete stock-footage friendly visual hints for every spoken segment.\n"
+    prompt += "- Hashtags must be relevant and start with #.\n"
+    prompt += "- Pixabay keywords must be short and useful for dark mystery stock footage searches.\n"
+    prompt += "- Do not reuse or closely paraphrase these recent titles:\n"
+    prompt += "\n".join(f"  - {title}" for title in recent_titles) if recent_titles else "  - none"
+    prompt += "\n"
+    prompt += "- Do not reuse the same angle, reveal, or evidence trail from these recent ideas:\n"
+    prompt += "\n".join(f"  - {brief}" for brief in recent_briefs) if recent_briefs else "  - none"
+    prompt += "\n"
+    prompt += "- The topic must be meaningfully different from the recent ideas.\n"
+    prompt += "- Avoid generic 'top 10' framing or filler transitions.\n\n"
+    prompt += "Return JSON in this format:\n"
+    prompt += "{\n"
+    prompt += '  "topics": [\n'
+    prompt += "    {\n"
+    prompt += '      "category": "...",\n'
+    prompt += '      "topic_formula": "...",\n'
+    prompt += '      "title": "...",\n'
+    prompt += '      "intro": "...",\n'
+    prompt += '      "bullets": ["...", "..."],\n'
+    prompt += '      "cta": "...",\n'
+    prompt += '      "hashtags": ["#...", "#..."],\n'
+    prompt += '      "asset_packs": ["..."],\n'
+    prompt += '      "visuals": ["...", "..."],\n'
+    prompt += '      "pixabay_keywords": ["...", "..."],\n'
+    prompt += '      "viral_scores": {"curiosity": 8, "shock": 8, "retention": 8, "shareability": 8}\n'
+    prompt += "    }\n"
+    prompt += "  ]\n"
+    prompt += "}\n"
+    prompt += "The visuals array must match the spoken segments count exactly: intro + each bullet + cta."
+    return prompt
+
+
 def _gemini_generate(prompt: str) -> dict:
     api_key = _provider_api_key("gemini")
     if not api_key:
@@ -408,6 +470,41 @@ def _gemini_generate(prompt: str) -> dict:
         params={"key": api_key},
         json={
             "system_instruction": {"parts": [{"text": JSON_ONLY_SYSTEM_PROMPT}]},
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.9,
+                "responseMimeType": "application/json",
+            },
+        },
+        timeout=90,
+    )
+    if not response.ok:
+        try:
+            error_message = response.json().get("error", {}).get("message", response.text)
+        except ValueError:
+            error_message = response.text
+        raise RuntimeError(f"Gemini topic generation failed: {truncate_text(error_message, 300)}")
+    payload = response.json()
+    candidates = payload.get("candidates") or []
+    if not candidates:
+        raise RuntimeError("Gemini returned no content candidates.")
+    parts = candidates[0].get("content", {}).get("parts", [])
+    text = "".join(part.get("text", "") for part in parts).strip()
+    if not text:
+        raise RuntimeError("Gemini returned an empty topic response.")
+    return _extract_json_object(text)
+
+
+def _gemini_generate_with_system_prompt(prompt: str, system_prompt: str) -> dict:
+    api_key = _provider_api_key("gemini")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is missing.")
+    model = _default_model_for_provider("gemini")
+    response = requests.post(
+        f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent",
+        params={"key": api_key},
+        json={
+            "system_instruction": {"parts": [{"text": system_prompt}]},
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {
                 "temperature": 0.9,
@@ -455,6 +552,25 @@ def _extract_message_text(message: Any) -> str:
 
 
 def _openai_compatible_generate(prompt: str, *, provider: str, model: str, base_url: str, api_key: str) -> dict:
+    return _openai_compatible_generate_with_system_prompt(
+        prompt,
+        provider=provider,
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+        system_prompt=JSON_ONLY_SYSTEM_PROMPT,
+    )
+
+
+def _openai_compatible_generate_with_system_prompt(
+    prompt: str,
+    *,
+    provider: str,
+    model: str,
+    base_url: str,
+    api_key: str,
+    system_prompt: str,
+) -> dict:
     if not api_key:
         raise RuntimeError(f"{provider.title()} API key is missing.")
     headers = {
@@ -472,7 +588,7 @@ def _openai_compatible_generate(prompt: str, *, provider: str, model: str, base_
             "temperature": 0.9,
             "response_format": {"type": "json_object"},
             "messages": [
-                {"role": "system", "content": JSON_ONLY_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": prompt},
             ],
         },
@@ -523,21 +639,26 @@ def _generate_topic_payload(niche: str) -> tuple[dict, str, str]:
 
 
 def _generate_custom_topic_payload(prompt: str) -> tuple[dict, str, str]:
+    return _generate_custom_topic_payload_with_system_prompt(prompt, JSON_ONLY_SYSTEM_PROMPT)
+
+
+def _generate_custom_topic_payload_with_system_prompt(prompt: str, system_prompt: str) -> tuple[dict, str, str]:
     failures: list[str] = []
     for candidate in _generation_candidates():
         provider = candidate["provider"]
         model = candidate["model"]
         try:
             if provider == "gemini":
-                return _gemini_generate(prompt), provider, model
+                return _gemini_generate_with_system_prompt(prompt, system_prompt), provider, model
             if provider in {"openai", "openrouter", "groq", "huggingface"}:
                 return (
-                    _openai_compatible_generate(
+                    _openai_compatible_generate_with_system_prompt(
                         prompt,
                         provider=provider,
                         model=model,
                         base_url=candidate["base_url"],
                         api_key=candidate["api_key"],
+                        system_prompt=system_prompt,
                     ),
                     provider,
                     model,
@@ -814,3 +935,69 @@ def build_ai_topic(niche: str) -> ViralTopic:
 
 def build_brainrot_video_topic() -> ViralTopic:
     return build_ai_topic(str(ContentNiche.DARK_CURIOSITY))
+
+
+def build_longform_topic(niche: str) -> ViralTopic:
+    niche = str(ContentNiche.DARK_CURIOSITY)
+    prompt = _longform_topic_prompt(niche)
+    attempts: list[str] = []
+    for _ in range(6):
+        raw_payload, provider, model = _generate_custom_topic_payload_with_system_prompt(
+            prompt,
+            LONGFORM_JSON_ONLY_SYSTEM_PROMPT,
+        )
+        payload = _validate_topic_payload(
+            raw_payload,
+            niche,
+            provider,
+            model,
+            bullet_limit=18,
+            minimum_bullets=12,
+        )
+        if _is_recent_topic_duplicate(niche, payload["title"], payload["intro"], payload["bullets"]):
+            attempts.append(payload["title"])
+            continue
+
+        script_lines = [payload["intro"], *payload["bullets"], payload["cta"]]
+        script = "\n".join(script_lines)
+        scene_plan = build_scene_plan(payload["intro"], payload["bullets"], payload["cta"], visuals=payload["visuals"])
+        duration_seconds = estimate_longform_duration_seconds(script, scene_plan)
+        minimum = max(120, int(getattr(settings, "LONGFORM_MIN_DURATION_SECONDS", 180)))
+        maximum = max(minimum, int(getattr(settings, "LONGFORM_MAX_DURATION_SECONDS", 300)))
+        if duration_seconds < minimum or duration_seconds > maximum:
+            attempts.append(f"{payload['title']} ({duration_seconds}s)")
+            continue
+        content_signature = stable_hash([niche, payload["title"].strip().lower(), " ".join(script.lower().split())])
+        return ViralTopic.objects.create(
+            niche=niche,
+            title=payload["title"],
+            hook=payload["intro"],
+            script=script,
+            scene_plan=scene_plan,
+            seo_title=f'{payload["title"]} | {getattr(settings, "CHANNEL_BRAND_NAME", "DarkBrainScroll")}',
+            description=script,
+            hashtags=payload["hashtags"] or ["#darkcuriosity", "#mystery", "#storytelling", "#youtube"],
+            source_notes=[
+                f"provider:{payload['provider']}",
+                f"model:{payload['model']}",
+                f"generated-at:{payload['generated_at']}",
+                f"estimated-duration:{duration_seconds}",
+                f"content-signature:{content_signature}",
+                "content-format:longform",
+                "render-mode:video-montage",
+                f"category:{payload['category']}",
+                f"topic-formula:{payload['topic_formula']}",
+                f"viral-score-curiosity:{payload['viral_scores']['curiosity']}",
+                f"viral-score-shock:{payload['viral_scores']['shock']}",
+                f"viral-score-retention:{payload['viral_scores']['retention']}",
+                f"viral-score-shareability:{payload['viral_scores']['shareability']}",
+                *[f"asset-pack:{pack}" for pack in payload["asset_packs"]],
+                *[f"pixabay-keyword:{keyword}" for keyword in payload["pixabay_keywords"]],
+                *[f"video-search:{keyword} documentary footage" for keyword in payload["pixabay_keywords"][:8]],
+            ],
+            is_trending=False,
+        )
+    attempted_titles = ", ".join(attempts[:6]) or "none"
+    raise RuntimeError(
+        f"Long-form topic generator kept returning repeated or invalid ideas for niche '{niche}'. Attempts: {attempted_titles}"
+    )

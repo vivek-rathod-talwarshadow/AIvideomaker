@@ -17,7 +17,13 @@ from .music import generate_background_music
 from .renderer import render_slideshow_video
 from .source_fetcher import fetch_scene_assets
 from .subtitles import generate_basic_srt
-from .topic_generator import build_ai_topic, build_brainrot_video_topic, estimate_duration_seconds
+from .topic_generator import (
+    build_ai_topic,
+    build_brainrot_video_topic,
+    build_longform_topic,
+    estimate_duration_seconds,
+    estimate_longform_duration_seconds,
+)
 from .uploaders import get_uploader
 from .utils import file_sha1, safe_rmtree, safe_unlink, stable_hash
 from .voiceover import DEFAULT_VOICE_NAME, generate_voiceover, resolve_voice_name
@@ -52,8 +58,33 @@ NON_RETRYABLE_UPLOAD_ERROR_MARKERS = (
     "two-factor",
 )
 
+TERMINAL_INSTAGRAM_AUTH_ERROR_MARKERS = (
+    "invalid oauth access token",
+    "cannot parse access token",
+    "access token has expired",
+    "session has expired",
+    "permissions error",
+    "unsupported post request",
+    "application does not have the capability",
+    "bad password",
+    "challenge_required",
+    "two-factor",
+    "you can log in with your linked facebook account",
+)
 
-def _project_video_dimensions() -> tuple[int, int]:
+
+def _project_content_format(project: VideoProject) -> str:
+    for note in project.topic.source_notes or []:
+        if str(note).startswith("content-format:"):
+            return str(note).split(":", 1)[1].strip().lower()
+    return str(project.caption_style.get("content_format") or "shorts").strip().lower()
+
+
+def _video_dimensions_for_format(content_format: str) -> tuple[int, int]:
+    if content_format == "longform":
+        width = max(640, int(getattr(settings, "LONGFORM_TARGET_WIDTH", 1920)))
+        height = max(360, int(getattr(settings, "LONGFORM_TARGET_HEIGHT", 1080)))
+        return width, height
     width = max(360, int(getattr(settings, "DEFAULT_VIDEO_WIDTH", 720)))
     height = max(640, int(getattr(settings, "DEFAULT_VIDEO_HEIGHT", 1280)))
     return width, height
@@ -67,18 +98,23 @@ def _project_render_mode(project: VideoProject) -> str:
 
 
 def _project_duration_seconds(project: VideoProject) -> int:
+    if _project_content_format(project) == "longform":
+        return estimate_longform_duration_seconds(project.topic.script, project.topic.scene_plan)
     estimated = estimate_duration_seconds(project.topic.script, project.topic.scene_plan)
     if _project_render_mode(project) == "brainrot-video":
         return max(90, min(180, estimated + 36))
     return estimated
 
 
-def _recent_automation_entries(limit: int = 100) -> list[dict]:
+def _recent_automation_entries(limit: int = 100, *, content_format: str | None = None) -> list[dict]:
     entries: list[dict] = []
     logs = EventLog.objects.filter(event_type="project.created").order_by("-created_at")[:limit]
     for log in logs:
         payload = log.payload or {}
         if payload.get("automation") is False:
+            continue
+        logged_format = str(payload.get("content_format") or "shorts").strip().lower()
+        if content_format and logged_format != content_format:
             continue
         title = str(payload.get("title") or "").strip()
         niche = str(payload.get("niche") or "").strip()
@@ -87,13 +123,18 @@ def _recent_automation_entries(limit: int = 100) -> list[dict]:
     return entries
 
 
-def _automation_projects_created_today() -> int:
+def _automation_projects_created_today(content_format: str = "shorts") -> int:
     today = timezone.localdate()
-    return EventLog.objects.filter(
+    count = 0
+    for log in EventLog.objects.filter(
         event_type="project.created",
         created_at__date=today,
         payload__automation=True,
-    ).count()
+    ):
+        logged_format = str((log.payload or {}).get("content_format") or "shorts").strip().lower()
+        if logged_format == content_format:
+            count += 1
+    return count
 
 
 def acquire_lock(key: str) -> bool:
@@ -408,6 +449,28 @@ def _fail_pending_jobs_for_project(project: VideoProject, reason: str) -> int:
     return updated_count
 
 
+def _project_has_incomplete_jobs(project: VideoProject) -> bool:
+    return project.publish_jobs.exclude(status__in=[JobStatus.POSTED, JobStatus.SKIPPED]).exists()
+
+
+def _skip_job(job: PublishJob, reason: str, *, event_type: str = "publish.skipped") -> PublishJob:
+    job.status = JobStatus.SKIPPED
+    job.last_error = reason
+    job.finished_at = timezone.now()
+    job.save(update_fields=["status", "last_error", "finished_at", "updated_at"])
+    log_event(event_type, reason, project=job.project, publish_job=job, level="error")
+
+    if not _project_has_incomplete_jobs(job.project):
+        job.project.status = JobStatus.POSTED
+        job.project.status_message = "Uploaded to all available platforms. Skipped a terminal platform error."
+        job.project.progress_percent = 100
+        job.project.save(update_fields=["status", "status_message", "progress_percent", "updated_at"])
+        delete_project_record(job.project, reason="successful upload with skipped terminal platform")
+    else:
+        _release_next_project_job(job.project, job.order_index)
+    return job
+
+
 def _release_next_project_job(project: VideoProject, completed_order_index: int, now=None) -> PublishJob | None:
     now = now or timezone.now()
     next_job = (
@@ -439,6 +502,12 @@ def get_enabled_platforms() -> list[str]:
 
 def is_platform_enabled(platform: str) -> bool:
     return platform in get_enabled_platforms()
+
+
+def _enabled_platforms_for_content_format(content_format: str) -> list[str]:
+    if content_format == "longform":
+        return [PlatformType.YOUTUBE] if PlatformType.YOUTUBE in get_enabled_platforms() else []
+    return get_enabled_platforms()
 
 
 def get_or_create_default_channel(platform: str) -> ChannelProfile:
@@ -475,11 +544,11 @@ def _select_automation_niche() -> str:
     return AUTOMATION_NICHE_ORDER[0]
 
 
-def _title_used_recently(title: str, limit: int = 60) -> bool:
+def _title_used_recently(title: str, limit: int = 60, *, content_format: str | None = None) -> bool:
     normalized = title.strip().lower()
     if not normalized:
         return False
-    for entry in _recent_automation_entries(limit=limit):
+    for entry in _recent_automation_entries(limit=limit, content_format=content_format):
         if entry["title"].strip().lower() == normalized:
             return True
     return False
@@ -496,162 +565,78 @@ def _ordered_automation_niches() -> list[str]:
 def _build_unique_automation_topic() -> ViralTopic:
     for niche in _ordered_automation_niches():
         candidate = build_ai_topic(niche)
-        if not _title_used_recently(candidate.title, limit=60):
+        if not _title_used_recently(candidate.title, limit=60, content_format="shorts"):
             return candidate
         candidate.delete()
     fallback_niche = _select_automation_niche()
     return build_ai_topic(fallback_niche)
 
 
-def _has_pending_project() -> bool:
-    return VideoProject.objects.filter(
+def _build_unique_longform_topic() -> ViralTopic:
+    for niche in _ordered_automation_niches():
+        candidate = build_longform_topic(niche)
+        if not _title_used_recently(candidate.title, limit=60, content_format="longform"):
+            return candidate
+        candidate.delete()
+    fallback_niche = _select_automation_niche()
+    return build_longform_topic(fallback_niche)
+
+
+def _has_pending_project(content_format: str = "shorts") -> bool:
+    pending_projects = VideoProject.objects.filter(
         status__in=[JobStatus.QUEUED, JobStatus.GENERATING, JobStatus.READY, JobStatus.POSTING]
-    ).exists()
+    ).select_related("topic")
+    return any(_project_content_format(project) == content_format for project in pending_projects)
 
 
-def create_daily_project_if_needed() -> VideoProject | None:
-    created_today = _automation_projects_created_today()
-    if created_today >= settings.MAX_VIDEOS_PER_DAY:
-        return None
-    state = get_automation_state()
-    enabled_platforms = get_enabled_platforms()
-    if not enabled_platforms:
-        log_event(
-            "automation.skipped",
-            "Automation did not create a project because no upload platform is fully configured.",
-            level="error",
-        )
-        return None
-    if _has_pending_project():
-        log_event(
-            "automation.skipped",
-            "Automation did not create a new project because an older video is still pending upload or retry.",
-        )
-        return None
-
-    if state.brainrot_mode:
-        project = create_brainrot_project(automation=True)
-    else:
-        topic = _build_unique_automation_topic()
-        duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
-        target_width, target_height = _project_video_dimensions()
-        default_voice_name = resolve_voice_name(state.default_voice_name)
-        project = VideoProject.objects.create(
-            topic=topic,
-            niche=topic.niche,
-            voice_name=default_voice_name,
-            status=JobStatus.QUEUED,
-            target_width=target_width,
-            target_height=target_height,
-            content_signature=stable_hash([topic.niche, topic.title.strip().lower(), " ".join(topic.script.lower().split())]),
-            duration_seconds=duration_seconds,
-            progress_percent=5,
-            status_message="Project created and waiting to generate.",
-            caption_style={
-                "font_size": 60,
-                "stroke": 4,
-                "highlight_color": "#F9D423",
-                "text_color": "#FFFFFF",
-                "position": "bottom-third",
-                "brand_name": settings.CHANNEL_BRAND_NAME,
-                "render_mode": "video-montage",
-            },
-        )
-        fetch_scene_assets(project)
-        for order_index, platform in enumerate(enabled_platforms, start=1):
-            channel = get_or_create_default_channel(platform)
-            PublishJob.objects.create(
-                project=project,
-                channel=channel,
-                scheduled_for=timezone.now() + timedelta(minutes=(order_index - 1) * 20),
-                order_index=order_index,
-            )
-        log_event("automation.project_queued", "Project queued for automatic generation and upload.", project=project)
-        log_event(
-            "project.created",
-            "Daily project generated.",
-            project=project,
-            payload={"title": project.topic.title, "niche": project.niche, "automation": True},
-        )
-    return project
+def _longform_daily_target() -> int:
+    minimum = max(1, int(getattr(settings, "LONGFORM_MIN_VIDEOS_PER_DAY", 2)))
+    maximum = max(minimum, int(getattr(settings, "LONGFORM_MAX_VIDEOS_PER_DAY", 5)))
+    today_key = timezone.localdate().isoformat()
+    seed = int(stable_hash([today_key, "longform-daily-target"])[:8], 16)
+    return minimum + (seed % (maximum - minimum + 1))
 
 
-def create_project(niche: str = "") -> VideoProject:
-    niche = str(ContentNiche.DARK_CURIOSITY)
-    topic = build_ai_topic(niche)
-    duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
-    target_width, target_height = _project_video_dimensions()
+def _create_project_record(
+    topic: ViralTopic,
+    *,
+    automation: bool,
+    content_format: str,
+    render_mode: str = "video-montage",
+    status_message: str,
+) -> VideoProject:
+    target_width, target_height = _video_dimensions_for_format(content_format)
     default_voice_name = resolve_voice_name(get_automation_state().default_voice_name)
+    duration_seconds = (
+        estimate_longform_duration_seconds(topic.script, topic.scene_plan)
+        if content_format == "longform"
+        else estimate_duration_seconds(topic.script, topic.scene_plan)
+    )
     project = VideoProject.objects.create(
         topic=topic,
         niche=topic.niche,
         voice_name=default_voice_name,
         status=JobStatus.QUEUED,
-        target_width=target_width,
-        target_height=target_height,
-        content_signature=stable_hash([topic.niche, topic.title.strip().lower(), " ".join(topic.script.lower().split())]),
-        duration_seconds=duration_seconds,
-        caption_style={
-            "font_size": 60,
-            "stroke": 4,
-            "highlight_color": "#F9D423",
-            "text_color": "#FFFFFF",
-            "position": "bottom-third",
-            "brand_name": settings.CHANNEL_BRAND_NAME,
-            "render_mode": "video-montage",
-        },
-    )
-    fetch_scene_assets(project)
-    enabled_platforms = get_enabled_platforms()
-    for order_index, platform in enumerate(enabled_platforms, start=1):
-        channel = get_or_create_default_channel(platform)
-        PublishJob.objects.create(
-            project=project,
-            channel=channel,
-            scheduled_for=timezone.now() + timedelta(minutes=(order_index - 1) * 20),
-            order_index=order_index,
-        )
-    if not enabled_platforms:
-        project.status = JobStatus.SKIPPED
-        project.failure_reason = "No platforms are enabled."
-        project.save(update_fields=["status", "failure_reason", "updated_at"])
-    log_event(
-        "project.created",
-        "Manual project generated from dashboard.",
-        project=project,
-        payload={"title": project.topic.title, "niche": project.niche, "automation": False},
-    )
-    return project
-
-
-def create_brainrot_project(automation: bool = False) -> VideoProject:
-    topic = build_brainrot_video_topic()
-    duration_seconds = estimate_duration_seconds(topic.script, topic.scene_plan)
-    target_width, target_height = _project_video_dimensions()
-    default_voice_name = resolve_voice_name(get_automation_state().default_voice_name)
-    project = VideoProject.objects.create(
-        topic=topic,
-        niche=topic.niche,
-        voice_name=default_voice_name,
-        status=JobStatus.QUEUED,
+        aspect_ratio="16:9" if content_format == "longform" else "9:16",
         target_width=target_width,
         target_height=target_height,
         content_signature=stable_hash([topic.niche, topic.title.strip().lower(), " ".join(topic.script.lower().split())]),
         duration_seconds=duration_seconds,
         progress_percent=5,
-        status_message="Dark Curiosity project created and waiting to generate.",
+        status_message=status_message,
         caption_style={
-            "font_size": 60,
+            "font_size": 42 if content_format == "longform" else 60,
             "stroke": 4,
             "highlight_color": "#F9D423",
             "text_color": "#FFFFFF",
             "position": "bottom-third",
             "brand_name": settings.CHANNEL_BRAND_NAME,
-            "render_mode": "video-montage",
+            "render_mode": render_mode,
+            "content_format": content_format,
         },
     )
     fetch_scene_assets(project)
-    enabled_platforms = get_enabled_platforms()
+    enabled_platforms = _enabled_platforms_for_content_format(content_format)
     for order_index, platform in enumerate(enabled_platforms, start=1):
         channel = get_or_create_default_channel(platform)
         PublishJob.objects.create(
@@ -665,19 +650,128 @@ def create_brainrot_project(automation: bool = False) -> VideoProject:
         project.failure_reason = "No platforms are enabled."
         project.save(update_fields=["status", "failure_reason", "updated_at"])
     if automation:
-        log_event("automation.project_queued", "Dark Curiosity project queued for automatic generation and upload.", project=project)
+        log_event(
+            "automation.project_queued",
+            f"{content_format.title()} project queued for automatic generation and upload.",
+            project=project,
+        )
     log_event(
         "project.created",
-        "Dark Curiosity video project generated." if automation else "Dark Curiosity video project generated from dashboard.",
+        f"{content_format.title()} project generated.",
         project=project,
-        payload={"title": project.topic.title, "niche": project.niche, "automation": automation, "mode": "brainrot"},
+        payload={
+            "title": project.topic.title,
+            "niche": project.niche,
+            "automation": automation,
+            "content_format": content_format,
+            "mode": render_mode,
+        },
     )
     return project
 
 
+def create_daily_project_if_needed() -> VideoProject | None:
+    created_today = _automation_projects_created_today("shorts")
+    if created_today >= settings.MAX_VIDEOS_PER_DAY:
+        return None
+    state = get_automation_state()
+    enabled_platforms = _enabled_platforms_for_content_format("shorts")
+    if not enabled_platforms:
+        log_event(
+            "automation.skipped",
+            "Automation did not create a project because no upload platform is fully configured.",
+            level="error",
+        )
+        return None
+    if _has_pending_project("shorts"):
+        log_event(
+            "automation.skipped",
+            "Automation did not create a new project because an older video is still pending upload or retry.",
+        )
+        return None
+
+    if state.brainrot_mode:
+        project = create_brainrot_project(automation=True)
+    else:
+        topic = _build_unique_automation_topic()
+        project = _create_project_record(
+            topic,
+            automation=True,
+            content_format="shorts",
+            render_mode="video-montage",
+            status_message="Project created and waiting to generate.",
+        )
+    return project
+
+
+def create_longform_project_if_needed() -> VideoProject | None:
+    if not getattr(settings, "ENABLE_LONGFORM_AUTOMATION", True):
+        return None
+    created_today = _automation_projects_created_today("longform")
+    if created_today >= _longform_daily_target():
+        return None
+    enabled_platforms = _enabled_platforms_for_content_format("longform")
+    if not enabled_platforms:
+        log_event(
+            "automation.skipped",
+            "Long-form automation did not create a project because YouTube is not fully configured.",
+            level="error",
+        )
+        return None
+    if _has_pending_project("longform"):
+        log_event(
+            "automation.skipped",
+            "Long-form automation did not create a new project because an older long-form video is still pending.",
+        )
+        return None
+    topic = _build_unique_longform_topic()
+    return _create_project_record(
+        topic,
+        automation=True,
+        content_format="longform",
+        render_mode="video-montage",
+        status_message="Long-form project created and waiting to generate.",
+    )
+
+
+def create_project(niche: str = "") -> VideoProject:
+    niche = str(ContentNiche.DARK_CURIOSITY)
+    topic = build_ai_topic(niche)
+    return _create_project_record(
+        topic,
+        automation=False,
+        content_format="shorts",
+        render_mode="video-montage",
+        status_message="Project created and waiting to generate.",
+    )
+
+
+def create_brainrot_project(automation: bool = False) -> VideoProject:
+    topic = build_brainrot_video_topic()
+    return _create_project_record(
+        topic,
+        automation=automation,
+        content_format="shorts",
+        render_mode="video-montage",
+        status_message="Dark Curiosity project created and waiting to generate.",
+    )
+
+
+def create_longform_project(niche: str = "") -> VideoProject:
+    niche = str(ContentNiche.DARK_CURIOSITY)
+    topic = build_longform_topic(niche)
+    return _create_project_record(
+        topic,
+        automation=False,
+        content_format="longform",
+        render_mode="video-montage",
+        status_message="Long-form project created and waiting to generate.",
+    )
+
+
 def ensure_publish_jobs(project: VideoProject) -> list[PublishJob]:
     existing_jobs = list(project.publish_jobs.select_related("channel").order_by("order_index", "created_at"))
-    enabled_platforms = get_enabled_platforms()
+    enabled_platforms = _enabled_platforms_for_content_format(_project_content_format(project))
     existing_platforms = {job.channel.platform for job in existing_jobs}
     jobs = list(existing_jobs)
     created_jobs = False
@@ -859,7 +953,7 @@ def _publish_job(job: PublishJob, now=None) -> PublishJob | None:
     blockers = PublishJob.objects.filter(
         project=job.project,
         order_index__lt=job.order_index,
-    ).exclude(status=JobStatus.POSTED)
+    ).exclude(status__in=[JobStatus.POSTED, JobStatus.SKIPPED])
     if blockers.exists():
         return None
 
@@ -914,7 +1008,7 @@ def _publish_job(job: PublishJob, now=None) -> PublishJob | None:
             },
         )
 
-        if not job.project.publish_jobs.exclude(status=JobStatus.POSTED).exists():
+        if not _project_has_incomplete_jobs(job.project):
             job.project.status = JobStatus.POSTED
             job.project.status_message = "Uploaded to all enabled platforms and deleted locally."
             job.project.progress_percent = 100
@@ -935,6 +1029,16 @@ def _publish_job(job: PublishJob, now=None) -> PublishJob | None:
                 job.project.save(update_fields=["status", "status_message", "progress_percent", "updated_at"])
         return job
     except Exception as exc:
+        normalized_exc = str(exc).lower()
+        if job.channel.platform == PlatformType.INSTAGRAM and any(
+            marker in normalized_exc for marker in TERMINAL_INSTAGRAM_AUTH_ERROR_MARKERS
+        ):
+            return _skip_job(
+                job,
+                "Instagram upload skipped because the account token or login credentials are invalid. "
+                "Fix the Instagram credentials before re-enabling Instagram uploads.",
+                event_type="publish.skipped_terminal_instagram_auth",
+            )
         if not _should_retry_after_exception(exc):
             return _defer_job(
                 job,
@@ -1070,7 +1174,7 @@ def dispatch_due_work() -> PublishJob | None:
         blockers = PublishJob.objects.filter(
             project=job.project,
             order_index__lt=job.order_index,
-        ).exclude(status=JobStatus.POSTED)
+        ).exclude(status__in=[JobStatus.POSTED, JobStatus.SKIPPED])
         if blockers.exists():
             continue
 
@@ -1099,7 +1203,8 @@ def process_due_work() -> dict:
 
         cleaned_orphans = cleanup_orphaned_project_media()
         cleaned_projects = cleanup_completed_projects()
-        project = create_daily_project_if_needed()
+        shorts_project = create_daily_project_if_needed()
+        longform_project = create_longform_project_if_needed()
         job = dispatch_due_work()
         state.last_cycle_at = timezone.now()
         state.last_error = ""
@@ -1109,6 +1214,8 @@ def process_due_work() -> dict:
             "Automation cycle finished.",
             payload={
                 "created_project_id": getattr(project, "id", None),
+                "created_shorts_project_id": getattr(shorts_project, "id", None),
+                "created_longform_project_id": getattr(longform_project, "id", None),
                 "processed_job_id": getattr(job, "id", None),
                 "cleaned_projects": cleaned_projects,
                 "cleaned_orphan_media_dirs": cleaned_orphans,
@@ -1116,7 +1223,9 @@ def process_due_work() -> dict:
         )
         return {
             "ok": True,
-            "created_project_id": getattr(project, "id", None),
+            "created_project_id": getattr(shorts_project or longform_project, "id", None),
+            "created_shorts_project_id": getattr(shorts_project, "id", None),
+            "created_longform_project_id": getattr(longform_project, "id", None),
             "processed_job_id": getattr(job, "id", None),
             "cleaned_projects": cleaned_projects,
             "cleaned_orphan_media_dirs": cleaned_orphans,

@@ -16,6 +16,13 @@ YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
 YOUTUBE_TOKEN_URI = "https://oauth2.googleapis.com/token"
 
 
+def _project_content_format(project) -> str:
+    for note in project.topic.source_notes or []:
+        if str(note).startswith("content-format:"):
+            return str(note).split(":", 1)[1].strip().lower()
+    return str(project.caption_style.get("content_format") or "shorts").strip().lower()
+
+
 def _extract_http_error_message(exc: HttpError) -> str:
     try:
         payload = json.loads(exc.content.decode("utf-8"))
@@ -70,14 +77,23 @@ def build_youtube_service():
 
 
 def build_youtube_metadata(project) -> dict:
-    default_tags = ["shorts", "viral", "trending", "storytime", "darkbrainscroll", "youtubeShorts"]
+    is_longform = _project_content_format(project) == "longform"
+    default_tags = (
+        ["darkcuriosity", "mystery", "documentary", "storytelling", "darkbrainscroll"]
+        if is_longform
+        else ["shorts", "viral", "trending", "storytime", "darkbrainscroll", "youtubeShorts"]
+    )
     tags = []
     for tag in [*project.topic.hashtags[:10], *[f"#{tag}" for tag in default_tags]]:
         normalized = tag.lstrip("#").strip()
         if normalized and normalized.lower() not in {item.lower() for item in tags}:
             tags.append(normalized)
 
-    title = truncate_text(f"{project.topic.title} | {settings.CHANNEL_BRAND_NAME} #Shorts", 95)
+    title = (
+        truncate_text(f"{project.topic.title} | {settings.CHANNEL_BRAND_NAME}", 95)
+        if is_longform
+        else truncate_text(f"{project.topic.title} | {settings.CHANNEL_BRAND_NAME} #Shorts", 95)
+    )
     niche_descriptions = {
         "dark-curiosity": "dark curiosity, unexplained mysteries, and suspense-driven shorts",
         "glam": "scroll-stopping glam, dance, and creator-style shorts",
@@ -85,13 +101,20 @@ def build_youtube_metadata(project) -> dict:
         "reddit": "POV drama and story-driven shorts",
         "psychology": "social psychology and attraction-pattern shorts",
     }
-    channel_blurb = niche_descriptions.get(project.niche, "fast viral story-driven shorts")
+    longform_niche_descriptions = {
+        "dark-curiosity": "long-form dark curiosity stories, unexplained mysteries, and suspense-driven documentaries",
+    }
+    channel_blurb = (
+        longform_niche_descriptions.get(project.niche, "long-form mystery storytelling videos")
+        if is_longform
+        else niche_descriptions.get(project.niche, "fast viral story-driven shorts")
+    )
     description_lines = [
         f"{settings.CHANNEL_BRAND_NAME} brings you {channel_blurb}.",
         "",
         project.topic.description or project.topic.script,
         "",
-        " ".join(f"#{tag}" for tag in tags[:12]) if tags else "#shorts #viral",
+        " ".join(f"#{tag}" for tag in tags[:12]) if tags else ("#darkcuriosity #mystery" if is_longform else "#shorts #viral"),
     ]
 
     return {
@@ -108,7 +131,7 @@ def build_youtube_metadata(project) -> dict:
     }
 
 
-def upload_youtube_short(project) -> str:
+def upload_youtube_video(project) -> str:
     service = build_youtube_service()
     request = service.videos().insert(
         part="snippet,status",
@@ -131,3 +154,7 @@ def upload_youtube_short(project) -> str:
     if not video_id:
         raise RuntimeError("YouTube upload completed without returning a video ID.")
     return video_id
+
+
+def upload_youtube_short(project) -> str:
+    return upload_youtube_video(project)

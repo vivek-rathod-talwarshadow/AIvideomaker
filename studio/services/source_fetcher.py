@@ -492,6 +492,10 @@ def _provider_search_order(project: VideoProject) -> tuple[str, ...]:
     return NICHE_PROVIDER_ORDER.get(project.niche, DEFAULT_PROVIDER_ORDER)
 
 
+def _is_landscape_project(project: VideoProject) -> bool:
+    return int(project.target_width or 0) > int(project.target_height or 0)
+
+
 def _query_budget() -> tuple[int, int]:
     max_queries = max(1, int(getattr(settings, "STOCK_MEDIA_MAX_SEARCH_QUERIES_PER_SCENE", 2)))
     per_page = max(1, min(8, int(getattr(settings, "STOCK_MEDIA_MAX_CANDIDATES_PER_QUERY", 4))))
@@ -651,18 +655,21 @@ def _build_regular_video_scene_queries(project: VideoProject, scene: dict) -> li
     scene_text = str(scene.get("text") or "").strip()
     keyword_phrase = _scene_keyword_phrase(scene_text, max_words=8)
     pixabay_keywords = _topic_note_terms(project, "pixabay-keyword:", limit=8)
+    orientation_hint = "horizontal cinematic footage" if _is_landscape_project(project) else "vertical stock video"
     candidates = [
         visual_hint,
         f"{visual_hint} footage" if visual_hint else "",
         f"{visual_hint} cinematic video" if visual_hint else "",
+        f"{visual_hint} horizontal cinematic footage" if visual_hint and _is_landscape_project(project) else "",
         keyword_phrase,
         f"{keyword_phrase} footage" if keyword_phrase else "",
+        f"{keyword_phrase} landscape documentary footage" if keyword_phrase and _is_landscape_project(project) else "",
         f"{project.niche} {keyword_phrase} footage" if keyword_phrase else "",
         f"{project.topic.title} documentary footage" if len(project.topic.title.split()) <= 8 else "",
         *pixabay_keywords,
         *_video_search_terms(project, limit=6),
         *REGULAR_VIDEO_QUERY_HINTS.get(project.niche, []),
-        "vertical stock video",
+        orientation_hint,
         "documentary footage",
     ]
     queries: list[str] = []
@@ -675,13 +682,13 @@ def _build_regular_video_scene_queries(project: VideoProject, scene: dict) -> li
     return queries
 
 
-def _pexels_video_candidates(query: str, per_page: int = 6) -> list[dict]:
+def _pexels_video_candidates(query: str, per_page: int = 6, orientation: str = "portrait") -> list[dict]:
     token = _configured_token(getattr(settings, "PEXELS_API_KEY", ""))
     if not token:
         return []
     query_variants = [
-        {"query": query, "per_page": per_page, "orientation": "portrait", "size": "medium"},
-        {"query": query, "per_page": per_page, "orientation": "portrait"},
+        {"query": query, "per_page": per_page, "orientation": orientation, "size": "medium"},
+        {"query": query, "per_page": per_page, "orientation": orientation},
         {"query": query, "per_page": per_page},
     ]
     for params in query_variants:
@@ -737,14 +744,16 @@ def _pixabay_video_candidates(query: str, per_page: int = 6) -> list[dict]:
     return []
 
 
-def _pick_pexels_video_file(video: dict) -> dict | None:
+def _pick_pexels_video_file(video: dict, prefer_landscape: bool = False) -> dict | None:
     files = list(video.get("video_files") or [])
-    portrait_files = [
-        item for item in files
-        if int(item.get("height") or 0) >= int(item.get("width") or 0)
+    oriented_files = [
+        item
+        for item in files
+        if (int(item.get("width") or 0) >= int(item.get("height") or 0)) == prefer_landscape
     ]
-    ranked = portrait_files or files
-    ranked.sort(key=lambda item: (abs((item.get("height") or 0) - 1280), item.get("width") or 0))
+    ranked = oriented_files or files
+    target_height = 1080 if prefer_landscape else 1280
+    ranked.sort(key=lambda item: (abs((item.get("height") or 0) - target_height), -(item.get("width") or 0)))
     return ranked[0] if ranked else None
 
 
@@ -757,9 +766,19 @@ def _pick_pixabay_video_file(video: dict) -> dict | None:
     return None
 
 
-def _resolve_pexels_video(query: str, output_path: Path, used_urls: set[str], per_page: int) -> dict | None:
+def _resolve_pexels_video(
+    query: str,
+    output_path: Path,
+    used_urls: set[str],
+    per_page: int,
+    prefer_landscape: bool = False,
+) -> dict | None:
     try:
-        videos = _pexels_video_candidates(query, per_page=per_page)
+        videos = _pexels_video_candidates(
+            query,
+            per_page=per_page,
+            orientation="landscape" if prefer_landscape else "portrait",
+        )
     except requests.RequestException:
         return None
     ranked_videos = sorted(
@@ -767,7 +786,7 @@ def _resolve_pexels_video(query: str, output_path: Path, used_urls: set[str], pe
         key=lambda video: hashlib.sha1(f"{query}|{video.get('id','')}".encode("utf-8")).hexdigest(),
     )
     for video in ranked_videos:
-        file_info = _pick_pexels_video_file(video)
+        file_info = _pick_pexels_video_file(video, prefer_landscape=prefer_landscape)
         candidate_url = file_info.get("link") if file_info else ""
         if not candidate_url or candidate_url in used_urls:
             continue
@@ -809,18 +828,26 @@ def _resolve_pixabay_video(query: str, output_path: Path, used_urls: set[str], p
     return None
 
 
-def _resolve_stock_video(query: str, output_path: Path, used_urls: set[str], per_page: int) -> dict | None:
-    resolver_map = {
-        "pexels": _resolve_pexels_video,
-        "pixabay": _resolve_pixabay_video,
-    }
-    for provider in ("pexels", "pixabay"):
-        resolver = resolver_map.get(provider)
-        if not resolver:
-            continue
-        result = resolver(query, output_path, used_urls, per_page)
-        if result:
-            return result
+def _resolve_stock_video(
+    project: VideoProject,
+    query: str,
+    output_path: Path,
+    used_urls: set[str],
+    per_page: int,
+) -> dict | None:
+    prefer_landscape = _is_landscape_project(project)
+    result = _resolve_pexels_video(
+        query,
+        output_path,
+        used_urls,
+        per_page,
+        prefer_landscape=prefer_landscape,
+    )
+    if result:
+        return result
+    result = _resolve_pixabay_video(query, output_path, used_urls, per_page)
+    if result:
+        return result
     return None
 
 
@@ -869,7 +896,7 @@ def fetch_video_scene_assets(project: VideoProject, replace_existing: bool = Fal
         query_limit = max(max_queries_per_scene + (4 if is_brainrot else 2), 5)
         for query in query_builder(project, scene)[:query_limit]:
             try:
-                stock_result = _resolve_stock_video(query, output_path, used_urls, per_page)
+                stock_result = _resolve_stock_video(project, query, output_path, used_urls, per_page)
             except requests.RequestException:
                 continue
             if stock_result:
@@ -878,7 +905,7 @@ def fetch_video_scene_assets(project: VideoProject, replace_existing: bool = Fal
             broad_queries = BRAINROT_VIDEO_QUERY_HINTS if is_brainrot else REGULAR_VIDEO_QUERY_HINTS.get(project.niche, [])
             for query in broad_queries:
                 try:
-                    stock_result = _resolve_stock_video(query, output_path, used_urls, per_page)
+                    stock_result = _resolve_stock_video(project, query, output_path, used_urls, per_page)
                 except requests.RequestException:
                     continue
                 if stock_result:

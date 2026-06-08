@@ -42,6 +42,8 @@ def _instagram_graph_configured() -> bool:
 
 
 def _instagram_private_api_configured() -> bool:
+    if not getattr(settings, "ENABLE_INSTAGRAM_PRIVATE_FALLBACK", False):
+        return False
     return all(
         [
             _configured_env_value("INSTAGRAM_USER_NAME") or _configured_env_value("INSTAGRAM_USERNAME"),
@@ -52,6 +54,23 @@ def _instagram_private_api_configured() -> bool:
 
 def instagram_upload_configured() -> bool:
     return _instagram_graph_configured() or _instagram_private_api_configured()
+
+
+def _is_graph_auth_error_message(message: str) -> bool:
+    normalized = str(message).lower()
+    return any(
+        marker in normalized
+        for marker in [
+            "invalid oauth access token",
+            "cannot parse access token",
+            "access token has expired",
+            "session has expired",
+            "permissions error",
+            "unsupported post request",
+            "user access token",
+            "application does not have the capability",
+        ]
+    )
 
 
 def _graph_api_base() -> str:
@@ -240,7 +259,7 @@ def upload_instagram_reel(project) -> str:
             return _upload_instagram_reel_via_graph_api(project)
         except Exception as exc:
             graph_error = exc
-            if not _instagram_private_api_configured():
+            if _is_graph_auth_error_message(exc) or not _instagram_private_api_configured():
                 raise
 
     if _instagram_private_api_configured():

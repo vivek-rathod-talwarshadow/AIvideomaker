@@ -29,9 +29,9 @@ class YouTubeUploader(BaseUploader):
         video_path = Path(job.project.output_file)
         if not video_path.exists():
             raise FileNotFoundError(f"Video not found: {video_path}")
-        from .youtube import upload_youtube_short
+        from .youtube import upload_youtube_video
 
-        remote_post_id = upload_youtube_short(job.project)
+        remote_post_id = upload_youtube_video(job.project)
         return UploadResult(remote_post_id=remote_post_id)
 
 
