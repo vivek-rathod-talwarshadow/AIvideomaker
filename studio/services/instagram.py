@@ -75,7 +75,22 @@ def _is_graph_auth_error_message(message: str) -> bool:
 
 def _graph_api_base() -> str:
     version = str(getattr(settings, "INSTAGRAM_GRAPH_API_VERSION", "v24.0")).strip() or "v24.0"
-    return f"https://graph.facebook.com/{version}"
+    base_url = str(getattr(settings, "INSTAGRAM_GRAPH_BASE_URL", "https://graph.instagram.com")).strip().rstrip("/")
+    return f"{base_url}/{version}"
+
+
+def _graph_api_fallback_base() -> str:
+    version = str(getattr(settings, "INSTAGRAM_GRAPH_API_VERSION", "v24.0")).strip() or "v24.0"
+    base_url = str(getattr(settings, "INSTAGRAM_GRAPH_FALLBACK_BASE_URL", "https://graph.facebook.com")).strip().rstrip("/")
+    return f"{base_url}/{version}"
+
+
+def _graph_api_candidates() -> list[str]:
+    candidates: list[str] = []
+    for base in [_graph_api_base(), _graph_api_fallback_base()]:
+        if base and base not in candidates:
+            candidates.append(base)
+    return candidates
 
 
 def _build_preview_url(project) -> str:
@@ -115,8 +130,35 @@ def build_instagram_caption(project) -> str:
     return truncate_text("\n".join(part for part in caption_parts if part is not None), 2200)
 
 
-def _graph_post(path: str, payload: dict) -> dict:
-    response = requests.post(path, data=payload, timeout=getattr(settings, "INSTAGRAM_API_TIMEOUT_SECONDS", 120))
+def _graph_headers(api_base: str, access_token: str) -> dict:
+    if "graph.instagram.com" in api_base:
+        return {"Authorization": f"Bearer {access_token}"}
+    return {}
+
+
+def _graph_payload(api_base: str, payload: dict, access_token: str) -> dict:
+    if "graph.instagram.com" in api_base:
+        filtered = dict(payload)
+        filtered.pop("access_token", None)
+        return filtered
+    return {**payload, "access_token": access_token}
+
+
+def _graph_params(api_base: str, params: dict, access_token: str) -> dict:
+    if "graph.instagram.com" in api_base:
+        filtered = dict(params)
+        filtered.pop("access_token", None)
+        return filtered
+    return {**params, "access_token": access_token}
+
+
+def _graph_post(path: str, payload: dict, *, api_base: str, access_token: str) -> dict:
+    response = requests.post(
+        path,
+        data=_graph_payload(api_base, payload, access_token),
+        headers=_graph_headers(api_base, access_token),
+        timeout=getattr(settings, "INSTAGRAM_API_TIMEOUT_SECONDS", 120),
+    )
     try:
         data = response.json()
     except ValueError as exc:
@@ -128,8 +170,13 @@ def _graph_post(path: str, payload: dict) -> dict:
     raise RuntimeError(f"Instagram upload failed: {message}")
 
 
-def _graph_get(path: str, params: dict) -> dict:
-    response = requests.get(path, params=params, timeout=getattr(settings, "INSTAGRAM_API_TIMEOUT_SECONDS", 120))
+def _graph_get(path: str, params: dict, *, api_base: str, access_token: str) -> dict:
+    response = requests.get(
+        path,
+        params=_graph_params(api_base, params, access_token),
+        headers=_graph_headers(api_base, access_token),
+        timeout=getattr(settings, "INSTAGRAM_API_TIMEOUT_SECONDS", 120),
+    )
     try:
         data = response.json()
     except ValueError as exc:
@@ -141,18 +188,15 @@ def _graph_get(path: str, params: dict) -> dict:
     raise RuntimeError(f"Instagram upload failed: {message}")
 
 
-def _wait_for_container_ready(container_id: str) -> None:
+def _wait_for_container_ready(container_id: str, *, api_base: str, access_token: str) -> None:
     timeout_seconds = max(30, int(getattr(settings, "INSTAGRAM_PUBLISH_TIMEOUT_SECONDS", 900)))
     poll_seconds = max(3, int(getattr(settings, "INSTAGRAM_STATUS_POLL_SECONDS", 10)))
     deadline = time.time() + timeout_seconds
-    status_url = f"{_graph_api_base()}/{container_id}"
-    params = {
-        "fields": "status_code",
-        "access_token": _configured_env_value("INSTAGRAM_TOKEN", compact=True),
-    }
+    status_url = f"{api_base}/{container_id}"
+    params = {"fields": "status_code"}
 
     while time.time() < deadline:
-        data = _graph_get(status_url, params)
+        data = _graph_get(status_url, params, api_base=api_base, access_token=access_token)
         status_code = str(data.get("status_code") or "").upper()
         if status_code == "FINISHED":
             return
@@ -178,35 +222,45 @@ def _upload_instagram_reel_via_graph_api(project) -> str:
 
     access_token = _configured_env_value("INSTAGRAM_TOKEN", compact=True)
     account_id = _configured_env_value("INSTAGRAM_ACCOUNT_ID", compact=True)
-    container_url = f"{_graph_api_base()}/{account_id}/media"
-    publish_url = f"{_graph_api_base()}/{account_id}/media_publish"
     preview_url = _build_preview_url(project)
 
-    create_payload = {
-        "media_type": "REELS",
-        "video_url": preview_url,
-        "caption": build_instagram_caption(project),
-        "share_to_feed": "true" if getattr(settings, "INSTAGRAM_SHARE_TO_FEED", True) else "false",
-        "access_token": access_token,
-    }
-    create_response = _graph_post(container_url, create_payload)
-    creation_id = str(create_response.get("id") or "").strip()
-    if not creation_id:
-        raise RuntimeError("Instagram did not return a media container ID.")
+    errors: list[str] = []
+    for api_base in _graph_api_candidates():
+        container_url = f"{api_base}/{account_id}/media"
+        publish_url = f"{api_base}/{account_id}/media_publish"
+        create_payload = {
+            "media_type": "REELS",
+            "video_url": preview_url,
+            "caption": build_instagram_caption(project),
+            "share_to_feed": "true" if getattr(settings, "INSTAGRAM_SHARE_TO_FEED", True) else "false",
+        }
+        try:
+            create_response = _graph_post(
+                container_url,
+                create_payload,
+                api_base=api_base,
+                access_token=access_token,
+            )
+            creation_id = str(create_response.get("id") or "").strip()
+            if not creation_id:
+                raise RuntimeError("Instagram did not return a media container ID.")
 
-    _wait_for_container_ready(creation_id)
+            _wait_for_container_ready(creation_id, api_base=api_base, access_token=access_token)
 
-    publish_response = _graph_post(
-        publish_url,
-        {
-            "creation_id": creation_id,
-            "access_token": access_token,
-        },
-    )
-    published_id = str(publish_response.get("id") or publish_response.get("post_id") or "").strip()
-    if not published_id:
-        raise RuntimeError("Instagram did not return a reel ID after publishing.")
-    return published_id
+            publish_response = _graph_post(
+                publish_url,
+                {"creation_id": creation_id},
+                api_base=api_base,
+                access_token=access_token,
+            )
+            published_id = str(publish_response.get("id") or publish_response.get("post_id") or "").strip()
+            if not published_id:
+                raise RuntimeError("Instagram did not return a reel ID after publishing.")
+            return published_id
+        except Exception as exc:
+            errors.append(f"{api_base}: {exc}")
+            continue
+    raise RuntimeError("Instagram upload failed across all configured Graph API hosts. " + " | ".join(errors))
 
 
 def _load_private_api_client():
