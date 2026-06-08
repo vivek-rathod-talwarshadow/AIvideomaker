@@ -12,6 +12,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 
 from .enums import ContentNiche, JobStatus, PlatformType
 from .models import EventLog, PublishJob, VideoProject
+from .services.instagram import instagram_upload_configured
 from .services.pipeline import get_automation_state
 from .services.voiceover import generate_voice_sample, get_voice_options, get_voice_map, resolve_voice_name
 
@@ -35,13 +36,8 @@ def _platform_status_cards() -> list[dict]:
             "name": "Instagram Reels",
             "platform": PlatformType.INSTAGRAM,
             "enabled": settings.ENABLE_INSTAGRAM_UPLOAD,
-            "connected": all(
-                [
-                    getattr(settings, "INSTAGRAM_USERNAME", ""),
-                    getattr(settings, "INSTAGRAM_PASSWORD", ""),
-                ]
-            ),
-            "note": "Temporarily disabled until API details are added.",
+            "connected": instagram_upload_configured(),
+            "note": "Publishes Reels through the Instagram Graph API when the token and account ID are set.",
         },
         {
             "name": "Pinterest Idea Pins",
@@ -162,7 +158,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                 JobStatus.QUEUED: ("Queued", "warn"),
                 JobStatus.GENERATING: ("Generating", "warn"),
                 JobStatus.READY: ("Ready to upload", "ok"),
-                JobStatus.POSTING: ("Uploading to YouTube", "warn"),
+                JobStatus.POSTING: ("Uploading to platform", "warn"),
                 JobStatus.POSTED: ("Uploaded and cleaned", "ok"),
                 JobStatus.FAILED: ("Failed and cleaned", "off"),
                 JobStatus.SKIPPED: ("Skipped", "off"),

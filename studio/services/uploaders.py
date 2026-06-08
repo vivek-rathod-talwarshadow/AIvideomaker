@@ -39,7 +39,13 @@ class InstagramUploader(BaseUploader):
     platform = PlatformType.INSTAGRAM
 
     def upload(self, job: PublishJob) -> UploadResult:
-        raise RuntimeError("Instagram upload is disabled for now.")
+        video_path = Path(job.project.output_file)
+        if not video_path.exists():
+            raise FileNotFoundError(f"Video not found: {video_path}")
+        from .instagram import upload_instagram_reel
+
+        remote_post_id = upload_instagram_reel(job.project)
+        return UploadResult(remote_post_id=remote_post_id)
 
 
 class PinterestUploader(BaseUploader):

@@ -1,6 +1,6 @@
 # ViralForge
 
-Render-friendly Django platform for generating lightweight vertical slideshow videos and publishing them to YouTube Shorts, with Instagram Reels and Pinterest kept disabled for now.
+Render-friendly Django platform for generating lightweight vertical slideshow videos and publishing them to YouTube Shorts and Instagram Reels, with Pinterest still disabled for now.
 
 ## What this repo includes
 
@@ -10,6 +10,7 @@ Render-friendly Django platform for generating lightweight vertical slideshow vi
 - Lightweight video generation services using `ffmpeg`, `moviepy`, `Pillow`, and `edge-tts`
 - Upload adapter structure for YouTube, Instagram, and Pinterest
 - Real YouTube Shorts upload flow using the official YouTube Data API
+- Instagram Reels upload flow using the Instagram Graph API
 - Docker-based Render deployment config and operational guidance
 - Production-minded implementation plan in [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)
 
@@ -44,9 +45,7 @@ python manage.py createsuperuser
 python manage.py runserver
 ```
 
-## YouTube setup
-
-The project is currently configured to focus on YouTube only.
+## YouTube and Instagram setup
 
 1. Put your Google OAuth client ID and client secret into `.env`
 2. Run `python manage.py generate_youtube_refresh_token`
@@ -54,6 +53,13 @@ The project is currently configured to focus on YouTube only.
 4. Restart Django
 
 The `YOUTUBE_API_KEY` is useful for read-only API calls, but uploads require OAuth plus a refresh token.
+
+For Instagram Reels publishing:
+
+1. Put `INSTAGRAM_TOKEN` and `INSTAGRAM_ACCOUNT_ID` into `.env`
+2. Set `APP_BASE_URL` to a public URL Meta can reach
+3. Set `ENABLE_INSTAGRAM_UPLOAD=True`
+4. Restart Django
 
 ## Environment variables
 

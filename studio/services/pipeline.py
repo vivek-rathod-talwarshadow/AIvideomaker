@@ -12,6 +12,7 @@ from django.utils import timezone
 from studio.enums import ContentNiche, JobStatus, PlatformType
 from studio.models import AutomationState, ChannelProfile, EventLog, PublishJob, SchedulerLock, VideoProject, ViralTopic
 from .logging_service import log_event
+from .instagram import instagram_upload_configured
 from .music import generate_background_music
 from .renderer import render_slideshow_video
 from .source_fetcher import fetch_scene_assets
@@ -378,7 +379,7 @@ def get_enabled_platforms() -> list[str]:
     platforms: list[str] = []
     if settings.ENABLE_YOUTUBE_UPLOAD and youtube_upload_configured():
         platforms.append(PlatformType.YOUTUBE)
-    if settings.ENABLE_INSTAGRAM_UPLOAD:
+    if settings.ENABLE_INSTAGRAM_UPLOAD and instagram_upload_configured():
         platforms.append(PlatformType.INSTAGRAM)
     if settings.ENABLE_PINTEREST_UPLOAD:
         platforms.append(PlatformType.PINTEREST)
@@ -818,7 +819,7 @@ def _publish_job(job: PublishJob, now=None) -> PublishJob | None:
             return _defer_job(
                 job,
                 next_slot,
-                f"Upload cooldown active. Waiting until {timezone.localtime(next_slot).strftime('%Y-%m-%d %H:%M:%S')} before the next YouTube upload.",
+                f"Upload cooldown active. Waiting until {timezone.localtime(next_slot).strftime('%Y-%m-%d %H:%M:%S')} before the next {job.channel.get_platform_display()} upload.",
                 event_type="publish.cooldown",
             )
         duplicate_project = _find_duplicate_uploaded_project(job.project)
@@ -856,7 +857,7 @@ def _publish_job(job: PublishJob, now=None) -> PublishJob | None:
 
         if not job.project.publish_jobs.exclude(status=JobStatus.POSTED).exists():
             job.project.status = JobStatus.POSTED
-            job.project.status_message = "Uploaded to YouTube and deleted locally."
+            job.project.status_message = "Uploaded to all enabled platforms and deleted locally."
             job.project.progress_percent = 100
             job.project.save(update_fields=["status", "status_message", "progress_percent", "updated_at"])
             delete_project_record(job.project, reason="successful upload")
@@ -892,7 +893,7 @@ def publish_project(project: VideoProject) -> PublishJob | None:
     )
     if not job:
         if not jobs:
-            project.status_message = "Upload blocked because YouTube is not fully configured."
+            project.status_message = "Upload blocked because no enabled platform is fully configured."
             project.failure_reason = "No enabled upload platform is available."
             project.save(update_fields=["status_message", "failure_reason", "updated_at"])
             log_event("publish.blocked", project.failure_reason, level="error", project=project)
@@ -910,7 +911,7 @@ def publish_project(project: VideoProject) -> PublishJob | None:
         job.scheduled_for = timezone.now()
         job.save(update_fields=["scheduled_for", "updated_at"])
 
-    set_project_progress(project, 100, "Video validated. Uploading to YouTube...")
+    set_project_progress(project, 100, f"Video validated. Uploading to {job.channel.get_platform_display()}...")
     return _publish_job(job)
 
 
