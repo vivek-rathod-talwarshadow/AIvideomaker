@@ -408,6 +408,24 @@ def _fail_pending_jobs_for_project(project: VideoProject, reason: str) -> int:
     return updated_count
 
 
+def _release_next_project_job(project: VideoProject, completed_order_index: int, now=None) -> PublishJob | None:
+    now = now or timezone.now()
+    next_job = (
+        project.publish_jobs.filter(
+            status=JobStatus.QUEUED,
+            order_index__gt=completed_order_index,
+        )
+        .order_by("order_index", "created_at")
+        .first()
+    )
+    if not next_job:
+        return None
+    if next_job.scheduled_for > now:
+        next_job.scheduled_for = now
+        next_job.save(update_fields=["scheduled_for", "updated_at"])
+    return next_job
+
+
 def get_enabled_platforms() -> list[str]:
     platforms: list[str] = []
     if settings.ENABLE_YOUTUBE_UPLOAD and youtube_upload_configured():
@@ -902,6 +920,19 @@ def _publish_job(job: PublishJob, now=None) -> PublishJob | None:
             job.project.progress_percent = 100
             job.project.save(update_fields=["status", "status_message", "progress_percent", "updated_at"])
             delete_project_record(job.project, reason="successful upload")
+        else:
+            _release_next_project_job(job.project, job.order_index, now=now)
+            next_platform_job = (
+                job.project.publish_jobs.filter(status=JobStatus.QUEUED).order_by("order_index", "created_at").first()
+            )
+            if next_platform_job:
+                job.project.status = JobStatus.READY
+                job.project.status_message = (
+                    f"Uploaded to {job.channel.get_platform_display()}. "
+                    f"Waiting for {next_platform_job.channel.get_platform_display()}."
+                )[:255]
+                job.project.progress_percent = 100
+                job.project.save(update_fields=["status", "status_message", "progress_percent", "updated_at"])
         return job
     except Exception as exc:
         if not _should_retry_after_exception(exc):

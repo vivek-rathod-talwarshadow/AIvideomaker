@@ -6,7 +6,7 @@ from django.utils import timezone
 
 from studio.enums import ContentNiche, JobStatus, PlatformType
 from studio.models import ChannelProfile, PublishJob, VideoProject, ViralTopic
-from studio.services.pipeline import _run_generation_task, dispatch_due_work
+from studio.services.pipeline import _publish_job, _run_generation_task, dispatch_due_work
 
 
 class PipelineQueueTests(TestCase):
@@ -82,3 +82,39 @@ class PipelineQueueTests(TestCase):
         self.assertEqual(project.status, JobStatus.FAILED)
         self.assertEqual(publish_job.status, JobStatus.FAILED)
         self.assertEqual(publish_job.last_error, "render exploded")
+
+    def test_successful_upload_releases_next_platform_immediately(self) -> None:
+        now = timezone.now()
+        project = self._project("Sequential upload", status=JobStatus.READY)
+        project.output_file = __file__
+        project.progress_percent = 100
+        project.save(update_fields=["output_file", "progress_percent", "updated_at"])
+
+        youtube = ChannelProfile.objects.create(name="YT", platform=PlatformType.YOUTUBE, is_active=True)
+        instagram = ChannelProfile.objects.create(name="IG", platform=PlatformType.INSTAGRAM, is_active=True)
+        youtube_job = PublishJob.objects.create(
+            project=project,
+            channel=youtube,
+            status=JobStatus.QUEUED,
+            order_index=1,
+            scheduled_for=now - timedelta(minutes=1),
+        )
+        instagram_job = PublishJob.objects.create(
+            project=project,
+            channel=instagram,
+            status=JobStatus.QUEUED,
+            order_index=2,
+            scheduled_for=now + timedelta(minutes=19),
+        )
+
+        with patch("studio.services.pipeline.get_uploader") as get_uploader:
+            uploader = get_uploader.return_value
+            uploader.upload.return_value.status = JobStatus.POSTED
+            uploader.upload.return_value.remote_post_id = "yt-123"
+            _publish_job(youtube_job, now=now)
+
+        instagram_job.refresh_from_db()
+        project.refresh_from_db()
+        self.assertLessEqual(instagram_job.scheduled_for, now)
+        self.assertEqual(project.status, JobStatus.READY)
+        self.assertIn("Waiting for Instagram Reels", project.status_message)
