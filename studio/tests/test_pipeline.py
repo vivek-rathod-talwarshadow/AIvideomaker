@@ -11,8 +11,12 @@ from studio.services.pipeline import (
     _publish_job,
     _run_generation_task,
     create_longform_project_if_needed,
+    create_projects_for_niches,
     dispatch_due_work,
+    normalize_selected_niches,
     process_due_work,
+    selected_automation_niches,
+    set_selected_niches,
 )
 from studio.services.instagram import instagram_upload_configured, upload_instagram_reel
 from studio.services.topic_generator import _validate_topic_payload
@@ -290,3 +294,34 @@ class PipelineQueueTests(TestCase):
         self.assertIsNotNone(result["created_longform_project_id"])
         create_short.assert_called_once()
         create_long.assert_called_once()
+
+    def test_selected_niches_are_saved_and_disable_brainrot_for_multi_niche_mode(self) -> None:
+        state = set_selected_niches([ContentNiche.ANIMALS, ContentNiche.CELEBRITY, "invalid-choice", ContentNiche.ANIMALS])
+
+        self.assertEqual(selected_automation_niches(state), [ContentNiche.ANIMALS, ContentNiche.CELEBRITY])
+        self.assertFalse(state.brainrot_mode)
+        self.assertEqual(normalize_selected_niches(state.selected_niches), [ContentNiche.ANIMALS, ContentNiche.CELEBRITY])
+
+    def test_create_projects_for_niches_creates_one_project_per_selected_niche(self) -> None:
+        animal_topic = ViralTopic.objects.create(
+            niche=ContentNiche.ANIMALS,
+            title="Animal Topic",
+            hook="Hook",
+            script="Intro\nBody\nOutro",
+            scene_plan=[],
+        )
+        car_topic = ViralTopic.objects.create(
+            niche=ContentNiche.CARS,
+            title="Car Topic",
+            hook="Hook",
+            script="Intro\nBody\nOutro",
+            scene_plan=[],
+        )
+
+        with patch("studio.services.pipeline.build_ai_topic", side_effect=[animal_topic, car_topic]), patch(
+            "studio.services.pipeline.fetch_scene_assets"
+        ):
+            projects = create_projects_for_niches([ContentNiche.ANIMALS, ContentNiche.CARS])
+
+        self.assertEqual(len(projects), 2)
+        self.assertEqual([project.niche for project in projects], [ContentNiche.ANIMALS, ContentNiche.CARS])
