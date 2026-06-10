@@ -228,6 +228,112 @@ def _niche_label(niche: str) -> str:
         return niche.replace("-", " ").title()
 
 
+def _niche_prompt_profile(niche: str) -> dict[str, str]:
+    profiles = {
+        str(ContentNiche.CARS): {
+            "angle": "viral car culture, launches, comparisons, hidden features, and enthusiast debate",
+            "formats": "new launch reactions, dream car comparisons, fastest feature breakdowns, ownership facts, viral car myths",
+            "visuals": "cars, interiors, driving shots, showrooms, dashboards, roads, close-up detail shots",
+        },
+        str(ContentNiche.TOP_10_CARS): {
+            "angle": "ranked car countdowns built for scroll retention",
+            "formats": "top 10 fastest, top 10 luxury, top 10 budget beasts, top 10 crazy designs",
+            "visuals": "ranked car clips, thumbnails, garages, speed shots, cinematic transitions",
+        },
+        str(ContentNiche.CAR_FACTS): {
+            "angle": "surprising car facts, innovations, pricing hooks, and buyer psychology",
+            "formats": "did you know car facts, hidden buttons, expensive mistakes, future tech",
+            "visuals": "dashboard closeups, steering wheels, engines, headlights, car factories",
+        },
+        str(ContentNiche.CAR_NEWS): {
+            "angle": "timely car launches, brand moves, price talk, and hype-worthy updates",
+            "formats": "launch buzz, leaked specs style videos, what changed this year, buying hype",
+            "visuals": "showroom reveals, press event style visuals, concept cars, test drives",
+        },
+        str(ContentNiche.LUXURY_CARS): {
+            "angle": "luxury lifestyle cars, status, interiors, and premium features",
+            "formats": "most expensive interiors, luxury vs budget, insane optional extras",
+            "visuals": "premium cabins, leather details, city night drives, luxury garages",
+        },
+        str(ContentNiche.SUPERCARS): {
+            "angle": "supercar speed, sound, rarity, flex appeal, and dream-garage energy",
+            "formats": "fastest supercars, insane price tags, rare editions, sound comparisons",
+            "visuals": "supercars revving, track shots, spoilers, carbon fiber, exotic dealerships",
+        },
+        str(ContentNiche.CUTE_ANIMALS): {
+            "angle": "cute, wholesome, highly shareable animal content",
+            "formats": "cute moments, cutest species facts, baby animal story beats, wholesome reactions",
+            "visuals": "puppies, kittens, baby animals, rescue clips, playful wildlife",
+        },
+        str(ContentNiche.ANIMALS): {
+            "angle": "wild animal behavior, unusual species, survival, and surprising facts",
+            "formats": "most dangerous habits, weird animal skills, animals you did not know existed",
+            "visuals": "wildlife footage, jungle, ocean, safari, macro animal shots",
+        },
+        str(ContentNiche.ANIMAL_FACTS): {
+            "angle": "fast, fascinating animal facts with strong rewatch value",
+            "formats": "crazy facts, animal myths vs truth, top survival tricks, rare species",
+            "visuals": "close-up wildlife, nature landscapes, pack behavior, underwater scenes",
+        },
+        str(ContentNiche.CELEBRITY): {
+            "angle": "celebrity moments, glow-ups, career twists, and pop culture hooks",
+            "formats": "before fame, wild success facts, celebrity transformations, iconic moments",
+            "visuals": "red carpet style footage, paparazzi vibe, stage lights, fan crowds",
+        },
+        str(ContentNiche.CELEBRITY_GOSSIP): {
+            "angle": "light, platform-safe celebrity buzz and internet chatter",
+            "formats": "rumor roundup style, viral celeb moments, surprise collabs, public reactions",
+            "visuals": "award shows, fan cameras, headlines, glam portraits, crowd reactions",
+        },
+        str(ContentNiche.CELEBRITY_FACTS): {
+            "angle": "surprising celebrity facts, money, habits, and hidden backstories",
+            "formats": "unknown facts, luxury habits, odd routines, career pivots",
+            "visuals": "spotlight stages, interviews, backstage scenes, portrait style clips",
+        },
+        str(ContentNiche.DANCE): {
+            "angle": "dance trends, challenge culture, glow-up edits, and hype energy",
+            "formats": "viral dance challenge ideas, easy trend moves, best performance hooks",
+            "visuals": "dance rehearsals, stage lights, silhouettes, motion closeups",
+        },
+        str(ContentNiche.GLAM): {
+            "angle": "glam creator energy, beauty, fashion, dance, and social-ready style",
+            "formats": "look breakdowns, glow-up hooks, style secrets, creator trend angles",
+            "visuals": "fashion shoots, mirror shots, makeup details, performance clips",
+        },
+        str(ContentNiche.STORY): {
+            "angle": "emotion-driven short stories with strong hook and payoff",
+            "formats": "twist stories, lesson stories, emotional confessions, micro-story arcs",
+            "visuals": "cinematic b-roll, city streets, emotional closeups, silhouettes",
+        },
+        str(ContentNiche.HORROR): {
+            "angle": "creepy but platform-safe horror stories and suspense hooks",
+            "formats": "2 sentence horror expanded, true-story style scares, unknown caller, haunted place hooks",
+            "visuals": "dark hallways, shadows, empty streets, fog, creepy interiors",
+        },
+        str(ContentNiche.MEME): {
+            "angle": "fast meme culture, relatable internet humor, and comment bait",
+            "formats": "relatable situations, trending joke formats, POV memes, chaotic comparisons",
+            "visuals": "reaction faces, exaggerated edits, funny stock clips, text-heavy meme setups",
+        },
+    }
+    return profiles.get(
+        niche,
+        {
+            "angle": f"viral {_niche_label(niche).lower()} content",
+            "formats": "fact-based hooks, trend-inspired list angles, comparison videos, story-driven shorts",
+            "visuals": "stock footage that clearly matches the niche and each spoken beat",
+        },
+    )
+
+
+def _default_hashtags_for_niche(niche: str, *, longform: bool = False) -> list[str]:
+    base = [f"#{word}" for word in re.findall(r"[a-z0-9]+", niche.replace("-", " ").lower())[:2]]
+    if niche == str(ContentNiche.DARK_CURIOSITY):
+        return ["#darkcuriosity", "#mystery", "#youtube", "#storytelling"] if longform else ["#darkcuriosity", "#mystery", "#shorts", "#viral"]
+    common = ["#viral", "#trending", "#fyp", "#youtube"] if longform else ["#viral", "#trending", "#shorts", "#fyp"]
+    return [*base, *common][:4]
+
+
 def _extract_logged_title(log: EventLog) -> str:
     payload_title = (log.payload or {}).get("title", "").strip()
     if payload_title:
@@ -408,10 +514,27 @@ def _topic_prompt(niche: str) -> str:
     recent_titles = _recently_used_titles(None, limit=20)
     recent_briefs = _recent_topic_briefs(None, limit=12)
     local_today = timezone.localtime(timezone.now()).strftime("%B %d, %Y")
-    prompt = f"Create 1 original Dark Curiosity YouTube Shorts topic for {local_today}.\n\n"
+    niche_label = _niche_label(niche)
+    profile = _niche_prompt_profile(niche)
+    prompt = f"Create 1 original trending {niche_label} YouTube Shorts idea for {local_today}.\n\n"
     prompt += "Rules:\n"
-    prompt += DARK_CURIOSITY_RULES
+    if niche == str(ContentNiche.DARK_CURIOSITY):
+        prompt += DARK_CURIOSITY_RULES
+    else:
+        prompt += f"- Stay fully inside the {niche_label} niche.\n"
+        prompt += f"- The topic must feel like it could trend right now in {profile['angle']}.\n"
+        prompt += f"- Prefer formats like: {profile['formats']}.\n"
+        prompt += "- Make it highly clickable, curiosity-driven, specific, and easy to understand on first listen.\n"
+        prompt += "- Focus on ideas with high views potential, strong hook rate, retention, and shareability.\n"
+        prompt += "- Do not make unverifiable breaking-news claims unless framed as a general trend angle.\n"
+        prompt += "- Return 6 to 8 bullets.\n"
+        prompt += "- Each bullet should be one spoken beat, not a paragraph.\n"
+        prompt += "- The full script should land around 35 to 50 seconds when spoken naturally.\n"
+        prompt += f"- Visual hints should be concrete stock-footage-friendly prompts using {profile['visuals']}.\n"
+        prompt += "- Generate exactly 20 useful Pixabay keywords.\n"
+        prompt += "- Score Curiosity, Shock, Retention, and Shareability from 1 to 10.\n"
     prompt += "- Make it feel fresh, clickable, specific, and impossible to skip.\n"
+    prompt += "- Build the topic around a trending idea, trend-style angle, or high-demand viewer curiosity.\n"
     prompt += "- Do not reuse or paraphrase these recent titles:\n"
     prompt += "\n".join(f"  - {title}" for title in recent_titles) if recent_titles else "  - none"
     prompt += "\n"
@@ -459,18 +582,28 @@ def _longform_topic_prompt(niche: str) -> str:
     recent_titles = _recently_used_titles(None, limit=20)
     recent_briefs = _recent_topic_briefs(None, limit=12)
     local_today = timezone.localtime(timezone.now()).strftime("%B %d, %Y")
-    prompt = f"Create 1 original Dark Curiosity long-form YouTube video topic for {local_today}.\n\n"
+    niche_label = _niche_label(niche)
+    profile = _niche_prompt_profile(niche)
+    prompt = f"Create 1 original trending {niche_label} long-form YouTube video idea for {local_today}.\n\n"
     prompt += "Rules:\n"
-    prompt += "- Stay fully inside the Dark Curiosity niche.\n"
+    if niche == str(ContentNiche.DARK_CURIOSITY):
+        prompt += "- Stay fully inside the Dark Curiosity niche.\n"
+        prompt += "- Structure the story as a layered mystery with rising stakes, evidence, twists, and an unresolved ending.\n"
+        prompt += "- Use a documentary storytelling tone, not listicle filler.\n"
+        prompt += "- Pixabay keywords must be short and useful for dark mystery stock footage searches.\n"
+    else:
+        prompt += f"- Stay fully inside the {niche_label} niche.\n"
+        prompt += f"- The idea should feel built for high-demand viewers interested in {profile['angle']}.\n"
+        prompt += f"- Prefer a format like {profile['formats']}.\n"
+        prompt += "- Use a story-led explainer tone instead of shallow filler.\n"
+        prompt += f"- Include stock-footage-friendly visuals using {profile['visuals']}.\n"
+        prompt += "- Pixabay keywords must be short and useful for this niche.\n"
     prompt += "- The final spoken script must feel built for a 3 to 5 minute horizontal YouTube video.\n"
     prompt += "- Open with a strong hook in the first 10 seconds.\n"
-    prompt += "- Structure the story as a layered mystery with rising stakes, evidence, twists, and an unresolved ending.\n"
-    prompt += "- Use a documentary storytelling tone, not listicle filler.\n"
     prompt += "- Keep each spoken beat concise, vivid, and easy to narrate.\n"
     prompt += "- Return 12 to 18 body beats so the edit has enough visual variety.\n"
     prompt += "- Include concrete stock-footage friendly visual hints for every spoken segment.\n"
     prompt += "- Hashtags must be relevant and start with #.\n"
-    prompt += "- Pixabay keywords must be short and useful for dark mystery stock footage searches.\n"
     prompt += "- Do not reuse or closely paraphrase these recent titles:\n"
     prompt += "\n".join(f"  - {title}" for title in recent_titles) if recent_titles else "  - none"
     prompt += "\n"
@@ -927,7 +1060,7 @@ def _is_recent_topic_duplicate(niche: str, title: str, intro: str, bullets: list
 
 
 def build_ai_topic(niche: str) -> ViralTopic:
-    niche = str(ContentNiche.DARK_CURIOSITY)
+    niche = niche if niche in {choice.value for choice in ContentNiche} else str(ContentNiche.DARK_CURIOSITY)
     attempts: list[str] = []
     for attempt in range(6):
         raw_payload, provider, model = _generate_topic_payload(niche)
@@ -952,7 +1085,7 @@ def build_ai_topic(niche: str) -> ViralTopic:
             scene_plan=scene_plan,
             seo_title=f'{payload["title"]} | {getattr(settings, "CHANNEL_BRAND_NAME", "DarkBrainScroll")}',
             description=script,
-            hashtags=payload["hashtags"] or ["#darkcuriosity", "#mystery", "#shorts", "#viral"],
+            hashtags=payload["hashtags"] or _default_hashtags_for_niche(niche),
             source_notes=[
                 f"provider:{payload['provider']}",
                 f"model:{payload['model']}",
@@ -979,7 +1112,7 @@ def build_brainrot_video_topic() -> ViralTopic:
 
 
 def build_longform_topic(niche: str) -> ViralTopic:
-    niche = str(ContentNiche.DARK_CURIOSITY)
+    niche = niche if niche in {choice.value for choice in ContentNiche} else str(ContentNiche.DARK_CURIOSITY)
     prompt = _longform_topic_prompt(niche)
     attempts: list[str] = []
     for _ in range(6):
@@ -1017,7 +1150,7 @@ def build_longform_topic(niche: str) -> ViralTopic:
             scene_plan=scene_plan,
             seo_title=f'{payload["title"]} | {getattr(settings, "CHANNEL_BRAND_NAME", "DarkBrainScroll")}',
             description=script,
-            hashtags=payload["hashtags"] or ["#darkcuriosity", "#mystery", "#storytelling", "#youtube"],
+            hashtags=payload["hashtags"] or _default_hashtags_for_niche(niche, longform=True),
             source_notes=[
                 f"provider:{payload['provider']}",
                 f"model:{payload['model']}",

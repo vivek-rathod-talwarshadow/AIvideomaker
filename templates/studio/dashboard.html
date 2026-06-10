@@ -333,6 +333,42 @@
             margin-bottom: 10px;
         }
 
+        .niche-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .niche-option {
+            display: flex;
+            align-items: start;
+            gap: 10px;
+            padding: 12px;
+            border-radius: 16px;
+            border: 1px solid var(--line);
+            background: rgba(255, 255, 255, 0.78);
+            line-height: 1.35;
+        }
+
+        .niche-option input {
+            margin-top: 2px;
+            inline-size: 16px;
+            block-size: 16px;
+            accent-color: var(--accent);
+        }
+
+        .niche-option span {
+            font-size: 0.92rem;
+        }
+
+        .selected-niche-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 12px;
+        }
+
         .actions {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -630,6 +666,10 @@
             .voice-controls {
                 grid-template-columns: 1fr;
             }
+
+            .niche-grid {
+                grid-template-columns: 1fr;
+            }
         }
 
         @media (max-width: 720px) {
@@ -765,8 +805,40 @@
                             {% if automation_state.brainrot_mode %}
                                 Dark Curiosity mode is active globally. New projects and automation runs will create dark mystery shorts only.
                             {% else %}
-                                Regular mode is active globally. New projects and automation runs will create standard video montage projects.
+                                Multi-niche mode is active globally. New projects and automation runs will use your saved trending niches one by one.
                             {% endif %}
+                        </div>
+
+                        <div id="niche-picker" class="niche-picker" {% if automation_state.brainrot_mode %}hidden{% endif %}>
+                            <form method="post" action="{% url 'set-selected-niches' %}">
+                                {% csrf_token %}
+                                <div class="muted" style="margin-top: 14px;">Choose the niches you want the AI to use for trending video ideas across the dashboard and automation.</div>
+                                <div class="niche-grid">
+                                    {% for value, label in niche_options %}
+                                        {% if value != 'dark-curiosity' %}
+                                            <label class="niche-option">
+                                                <input type="checkbox" name="niches" value="{{ value }}" {% if value in selected_niches %}checked{% endif %}>
+                                                <span>{{ label }}</span>
+                                            </label>
+                                        {% endif %}
+                                    {% endfor %}
+                                </div>
+                                <div class="selected-niche-list">
+                                    {% for value in selected_niches %}
+                                        {% if value != 'dark-curiosity' or not automation_state.brainrot_mode %}
+                                            <span class="badge badge-warn">
+                                                {% for niche_value, niche_label in niche_options %}{% if niche_value == value %}{{ niche_label }}{% endif %}{% endfor %}
+                                            </span>
+                                        {% endif %}
+                                    {% endfor %}
+                                </div>
+                                <div class="muted" style="margin-top: 10px;">
+                                    Saved niches drive topic prompts, manual project creation, and automation topic rotation.
+                                </div>
+                                <div style="margin-top: 12px;">
+                                    <button class="btn btn-secondary" type="submit">Save Trending Niches</button>
+                                </div>
+                            </form>
                         </div>
                     </div>
 
@@ -822,18 +894,9 @@
                             </form>
                             <form method="post" action="{% url 'start-new-project' %}">
                                 {% csrf_token %}
-                                <div id="niche-picker" class="niche-picker" {% if automation_state.brainrot_mode %}hidden{% endif %}>
-                                    <select name="niche" aria-label="Video niche">
-                                        <option value="">Dark Curiosity</option>
-                                        {% for value, label in niche_options %}
-                                            <option value="{{ value }}">{{ label }}</option>
-                                        {% endfor %}
-                                    </select>
-                                    <div class="muted" style="margin-top: 6px;">
-                                        This workflow now generates only Dark Curiosity topics built for retention, rewatches, and suspense.
-                                    </div>
-                                </div>
-                                <button class="btn btn-secondary" type="submit">Create New Video</button>
+                                <button class="btn btn-secondary" type="submit">
+                                    {% if automation_state.brainrot_mode %}Create Mystery Video{% else %}Create Videos From Saved Niches{% endif %}
+                                </button>
                             </form>
                             <form method="post" action="{% url 'start-generate' %}">
                                 {% csrf_token %}

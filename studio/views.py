@@ -13,7 +13,7 @@ from django.views.decorators.http import require_GET, require_http_methods, requ
 from .enums import ContentNiche, JobStatus, PlatformType
 from .models import EventLog, PublishJob, VideoProject
 from .services.instagram import instagram_upload_configured
-from .services.pipeline import get_automation_state
+from .services.pipeline import available_niche_choices, get_automation_state, selected_automation_niches
 from .services.voiceover import generate_voice_sample, get_voice_options, get_voice_map, resolve_voice_name
 
 
@@ -114,7 +114,8 @@ def dashboard(request: HttpRequest) -> HttpResponse:
         "recent_logs": [],
         "automation_state": automation_state,
         "voice_options": voice_options,
-        "niche_options": [(ContentNiche.DARK_CURIOSITY, ContentNiche.DARK_CURIOSITY.label)],
+        "niche_options": available_niche_choices(),
+        "selected_niches": [str(ContentNiche.DARK_CURIOSITY)],
         "selected_voice_name": resolve_voice_name(automation_state.default_voice_name),
         "stats": {
             "total_projects": 0,
@@ -185,6 +186,7 @@ def dashboard(request: HttpRequest) -> HttpResponse:
                     "disk_clean_projects": sum(1 for project in recent_projects if not project.video_exists),
                 },
                 "automation_state": automation_state,
+                "selected_niches": selected_automation_niches(automation_state),
                 "selected_voice_name": resolve_voice_name(automation_state.default_voice_name),
             }
         )
@@ -334,24 +336,41 @@ def set_brainrot_mode(request: HttpRequest) -> HttpResponse:
 
 
 @require_POST
+def set_selected_niches(request: HttpRequest) -> HttpResponse:
+    from .services.pipeline import set_selected_niches as update_selected_niches
+
+    niches = request.POST.getlist("niches")
+    state = update_selected_niches(niches)
+    selected_labels = ", ".join(
+        ContentNiche(value).label if value in {choice.value for choice in ContentNiche} else value
+        for value in selected_automation_niches(state)
+    )
+    messages.success(request, f"Trending niches updated: {selected_labels}")
+    return redirect("dashboard")
+
+
+@require_POST
 def start_new_project(request: HttpRequest) -> HttpResponse:
-    from .services.pipeline import create_brainrot_project, create_project, get_automation_state, start_generation_async
+    from .services.pipeline import create_brainrot_project, create_projects_for_niches, get_automation_state, start_generation_async
     from .services.logging_service import log_event
 
-    niche = str(request.POST.get("niche") or "").strip()
-    brainrot_mode = bool(get_automation_state().brainrot_mode)
+    state = get_automation_state()
+    brainrot_mode = bool(state.brainrot_mode)
     try:
         if brainrot_mode:
             project = create_brainrot_project()
+            projects = [project]
             start_generation_async(project)
         else:
-            project = create_project(niche=niche)
+            projects = create_projects_for_niches(state.selected_niches)
+            project = projects[0]
+            start_generation_async(project)
     except Exception as exc:
         log_event(
             "project.create_failed",
             "Manual project creation failed from dashboard.",
             level="error",
-            payload={"error": str(exc), "niche": niche, "brainrot_mode": brainrot_mode},
+            payload={"error": str(exc), "selected_niches": state.selected_niches, "brainrot_mode": brainrot_mode},
         )
         messages.error(request, f"Could not create a new video: {exc}")
         return redirect("dashboard")
@@ -359,7 +378,10 @@ def start_new_project(request: HttpRequest) -> HttpResponse:
     if brainrot_mode:
         messages.success(request, f"Dark Curiosity project #{project.id} created and generation started: {project.topic.title}")
     else:
-        messages.success(request, f"Created project #{project.id}: {project.topic.title}")
+        messages.success(
+            request,
+            f"Created {len(projects)} niche-based trending video project(s). First in queue: #{project.id} {project.topic.title}",
+        )
     return redirect("dashboard")
 
 

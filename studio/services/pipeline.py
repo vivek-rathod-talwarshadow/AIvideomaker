@@ -30,6 +30,32 @@ from .voiceover import DEFAULT_VOICE_NAME, generate_voiceover, resolve_voice_nam
 
 
 AUTOMATION_NICHE_ORDER = (
+    ContentNiche.CARS,
+    ContentNiche.TOP_10_CARS,
+    ContentNiche.CAR_FACTS,
+    ContentNiche.CAR_NEWS,
+    ContentNiche.LUXURY_CARS,
+    ContentNiche.SUPERCARS,
+    ContentNiche.CUTE_ANIMALS,
+    ContentNiche.ANIMALS,
+    ContentNiche.ANIMAL_FACTS,
+    ContentNiche.CELEBRITY,
+    ContentNiche.CELEBRITY_GOSSIP,
+    ContentNiche.CELEBRITY_FACTS,
+    ContentNiche.DANCE,
+    ContentNiche.GLAM,
+    ContentNiche.STORY,
+    ContentNiche.HORROR,
+    ContentNiche.MEME,
+    ContentNiche.REDDIT,
+    ContentNiche.TECH,
+    ContentNiche.AI,
+    ContentNiche.MONEY,
+    ContentNiche.PSYCHOLOGY,
+    ContentNiche.CRIME,
+    ContentNiche.MYTHOLOGY,
+    ContentNiche.SPACE,
+    ContentNiche.DID_YOU_KNOW,
     ContentNiche.DARK_CURIOSITY,
 )
 
@@ -121,6 +147,35 @@ def _recent_automation_entries(limit: int = 100, *, content_format: str | None =
         if title or niche:
             entries.append({"title": title, "niche": niche})
     return entries
+
+
+def available_niche_choices() -> list[tuple[str, str]]:
+    return [(choice.value, choice.label) for choice in ContentNiche]
+
+
+def normalize_selected_niches(raw_values) -> list[str]:
+    if raw_values is None:
+        values: list[str] = []
+    elif isinstance(raw_values, str):
+        values = [raw_values]
+    else:
+        values = list(raw_values)
+
+    valid_values = {choice.value for choice in ContentNiche}
+    normalized: list[str] = []
+    for value in values:
+        cleaned = str(value or "").strip()
+        if cleaned and cleaned in valid_values and cleaned not in normalized:
+            normalized.append(cleaned)
+    return normalized
+
+
+def selected_automation_niches(state: AutomationState | None = None) -> list[str]:
+    state = state or get_automation_state()
+    normalized = normalize_selected_niches(state.selected_niches)
+    if normalized:
+        return normalized
+    return [str(ContentNiche.DARK_CURIOSITY)]
 
 
 def _automation_projects_created_today(content_format: str = "shorts") -> int:
@@ -280,12 +335,17 @@ def get_automation_state() -> AutomationState:
         defaults={
             "default_voice_name": resolve_voice_name(getattr(settings, "EDGE_TTS_VOICE", DEFAULT_VOICE_NAME)),
             "brainrot_mode": True,
+            "selected_niches": [str(ContentNiche.DARK_CURIOSITY)],
             "is_enabled": True,
             "auto_upload": True,
             "retry_failures": True,
             "last_started_at": timezone.now(),
         },
     )
+    normalized_niches = normalize_selected_niches(state.selected_niches)
+    if normalized_niches != list(state.selected_niches or []):
+        state.selected_niches = normalized_niches or [str(ContentNiche.DARK_CURIOSITY)]
+        state.save(update_fields=["selected_niches", "updated_at"])
     return state
 
 
@@ -297,6 +357,23 @@ def set_brainrot_mode(enabled: bool) -> AutomationState:
         "automation.mode_changed",
         "Brainrot mode enabled." if enabled else "Brainrot mode disabled.",
         payload={"brainrot_mode": bool(enabled)},
+    )
+    return state
+
+
+def set_selected_niches(niches: list[str]) -> AutomationState:
+    state = get_automation_state()
+    normalized = normalize_selected_niches(niches) or [str(ContentNiche.DARK_CURIOSITY)]
+    state.selected_niches = normalized
+    if normalized != [str(ContentNiche.DARK_CURIOSITY)]:
+        state.brainrot_mode = False
+        state.save(update_fields=["selected_niches", "brainrot_mode", "updated_at"])
+    else:
+        state.save(update_fields=["selected_niches", "updated_at"])
+    log_event(
+        "automation.niches_changed",
+        "Automation niches updated.",
+        payload={"selected_niches": normalized, "brainrot_mode": state.brainrot_mode},
     )
     return state
 
@@ -529,19 +606,20 @@ def get_or_create_default_channel(platform: str) -> ChannelProfile:
 
 
 def _select_automation_niche() -> str:
+    configured_niches = selected_automation_niches()
     recent_niches = [
         entry["niche"]
-        for entry in _recent_automation_entries(limit=len(AUTOMATION_NICHE_ORDER) * 4)
-        if entry["niche"] in AUTOMATION_NICHE_ORDER
+        for entry in _recent_automation_entries(limit=max(len(configured_niches), 1) * 4)
+        if entry["niche"] in configured_niches
     ]
-    for niche in AUTOMATION_NICHE_ORDER:
+    for niche in configured_niches:
         if niche not in recent_niches:
             return niche
     latest_niche = recent_niches[0] if recent_niches else ""
-    for niche in AUTOMATION_NICHE_ORDER:
+    for niche in configured_niches:
         if niche != latest_niche:
             return niche
-    return AUTOMATION_NICHE_ORDER[0]
+    return configured_niches[0]
 
 
 def _title_used_recently(title: str, limit: int = 60, *, content_format: str | None = None) -> bool:
@@ -556,10 +634,11 @@ def _title_used_recently(title: str, limit: int = 60, *, content_format: str | N
 
 def _ordered_automation_niches() -> list[str]:
     preferred = _select_automation_niche()
-    if preferred not in AUTOMATION_NICHE_ORDER:
-        return list(AUTOMATION_NICHE_ORDER)
-    start_index = AUTOMATION_NICHE_ORDER.index(preferred)
-    return list(AUTOMATION_NICHE_ORDER[start_index:]) + list(AUTOMATION_NICHE_ORDER[:start_index])
+    configured_niches = selected_automation_niches()
+    if preferred not in configured_niches:
+        return list(configured_niches)
+    start_index = configured_niches.index(preferred)
+    return list(configured_niches[start_index:]) + list(configured_niches[:start_index])
 
 
 def _build_unique_automation_topic() -> ViralTopic:
@@ -735,7 +814,7 @@ def create_longform_project_if_needed() -> VideoProject | None:
 
 
 def create_project(niche: str = "") -> VideoProject:
-    niche = str(ContentNiche.DARK_CURIOSITY)
+    niche = niche if niche in {choice.value for choice in ContentNiche} else str(ContentNiche.DARK_CURIOSITY)
     topic = build_ai_topic(niche)
     return _create_project_record(
         topic,
@@ -744,6 +823,13 @@ def create_project(niche: str = "") -> VideoProject:
         render_mode="video-montage",
         status_message="Project created and waiting to generate.",
     )
+
+
+def create_projects_for_niches(niches: list[str]) -> list[VideoProject]:
+    projects: list[VideoProject] = []
+    for niche in normalize_selected_niches(niches) or [str(ContentNiche.DARK_CURIOSITY)]:
+        projects.append(create_project(niche=niche))
+    return projects
 
 
 def create_brainrot_project(automation: bool = False) -> VideoProject:
@@ -758,7 +844,7 @@ def create_brainrot_project(automation: bool = False) -> VideoProject:
 
 
 def create_longform_project(niche: str = "") -> VideoProject:
-    niche = str(ContentNiche.DARK_CURIOSITY)
+    niche = niche if niche in {choice.value for choice in ContentNiche} else str(ContentNiche.DARK_CURIOSITY)
     topic = build_longform_topic(niche)
     return _create_project_record(
         topic,

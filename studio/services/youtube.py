@@ -10,6 +10,7 @@ from googleapiclient.http import MediaFileUpload
 from django.conf import settings
 
 from .utils import truncate_text
+from studio.enums import ContentNiche
 
 
 YOUTUBE_UPLOAD_SCOPE = "https://www.googleapis.com/auth/youtube.upload"
@@ -94,6 +95,10 @@ def build_youtube_metadata(project) -> dict:
         if is_longform
         else truncate_text(f"{project.topic.title} | {settings.CHANNEL_BRAND_NAME} #Shorts", 95)
     )
+    try:
+        niche_label = ContentNiche(project.niche).label.lower()
+    except ValueError:
+        niche_label = str(project.niche).replace("-", " ").lower()
     niche_descriptions = {
         "dark-curiosity": "dark curiosity, unexplained mysteries, and suspense-driven shorts",
         "glam": "scroll-stopping glam, dance, and creator-style shorts",
@@ -105,9 +110,9 @@ def build_youtube_metadata(project) -> dict:
         "dark-curiosity": "long-form dark curiosity stories, unexplained mysteries, and suspense-driven documentaries",
     }
     channel_blurb = (
-        longform_niche_descriptions.get(project.niche, "long-form mystery storytelling videos")
+        longform_niche_descriptions.get(project.niche, f"long-form {niche_label} videos")
         if is_longform
-        else niche_descriptions.get(project.niche, "fast viral story-driven shorts")
+        else niche_descriptions.get(project.niche, f"fast viral {niche_label} shorts")
     )
     description_lines = [
         f"{settings.CHANNEL_BRAND_NAME} brings you {channel_blurb}.",
