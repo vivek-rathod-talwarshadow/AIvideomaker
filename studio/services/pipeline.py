@@ -153,6 +153,14 @@ def available_niche_choices() -> list[tuple[str, str]]:
     return [(choice.value, choice.label) for choice in ContentNiche]
 
 
+def default_automation_niches() -> list[str]:
+    return [
+        str(ContentNiche.ANIMALS),
+        str(ContentNiche.CELEBRITY),
+        str(ContentNiche.PSYCHOLOGY),
+    ]
+
+
 def normalize_selected_niches(raw_values) -> list[str]:
     if raw_values is None:
         values: list[str] = []
@@ -175,7 +183,7 @@ def selected_automation_niches(state: AutomationState | None = None) -> list[str
     normalized = normalize_selected_niches(state.selected_niches)
     if normalized:
         return normalized
-    return [str(ContentNiche.DARK_CURIOSITY)]
+    return default_automation_niches()
 
 
 def _automation_projects_created_today(content_format: str = "shorts") -> int:
@@ -334,8 +342,8 @@ def get_automation_state() -> AutomationState:
         key="global",
         defaults={
             "default_voice_name": resolve_voice_name(getattr(settings, "EDGE_TTS_VOICE", DEFAULT_VOICE_NAME)),
-            "brainrot_mode": True,
-            "selected_niches": [str(ContentNiche.DARK_CURIOSITY)],
+            "brainrot_mode": False,
+            "selected_niches": default_automation_niches(),
             "is_enabled": True,
             "auto_upload": True,
             "retry_failures": True,
@@ -344,7 +352,7 @@ def get_automation_state() -> AutomationState:
     )
     normalized_niches = normalize_selected_niches(state.selected_niches)
     if normalized_niches != list(state.selected_niches or []):
-        state.selected_niches = normalized_niches or [str(ContentNiche.DARK_CURIOSITY)]
+        state.selected_niches = normalized_niches or default_automation_niches()
         state.save(update_fields=["selected_niches", "updated_at"])
     return state
 
@@ -363,13 +371,10 @@ def set_brainrot_mode(enabled: bool) -> AutomationState:
 
 def set_selected_niches(niches: list[str]) -> AutomationState:
     state = get_automation_state()
-    normalized = normalize_selected_niches(niches) or [str(ContentNiche.DARK_CURIOSITY)]
+    normalized = normalize_selected_niches(niches) or default_automation_niches()
     state.selected_niches = normalized
-    if normalized != [str(ContentNiche.DARK_CURIOSITY)]:
-        state.brainrot_mode = False
-        state.save(update_fields=["selected_niches", "brainrot_mode", "updated_at"])
-    else:
-        state.save(update_fields=["selected_niches", "updated_at"])
+    state.brainrot_mode = False
+    state.save(update_fields=["selected_niches", "brainrot_mode", "updated_at"])
     log_event(
         "automation.niches_changed",
         "Automation niches updated.",

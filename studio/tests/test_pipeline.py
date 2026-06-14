@@ -12,6 +12,7 @@ from studio.services.pipeline import (
     _run_generation_task,
     create_longform_project_if_needed,
     create_projects_for_niches,
+    default_automation_niches,
     dispatch_due_work,
     normalize_selected_niches,
     process_due_work,
@@ -301,6 +302,12 @@ class PipelineQueueTests(TestCase):
         self.assertEqual(selected_automation_niches(state), [ContentNiche.ANIMALS, ContentNiche.CELEBRITY])
         self.assertFalse(state.brainrot_mode)
         self.assertEqual(normalize_selected_niches(state.selected_niches), [ContentNiche.ANIMALS, ContentNiche.CELEBRITY])
+
+    def test_selected_niches_fall_back_to_multi_niche_defaults(self) -> None:
+        state = set_selected_niches([])
+
+        self.assertEqual(selected_automation_niches(state), default_automation_niches())
+        self.assertFalse(state.brainrot_mode)
 
     def test_create_projects_for_niches_creates_one_project_per_selected_niche(self) -> None:
         animal_topic = ViralTopic.objects.create(

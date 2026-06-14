@@ -794,22 +794,11 @@
                     </div>
 
                     <div class="mode-panel">
-                        <form method="post" action="{% url 'set-brainrot-mode' %}">
-                            {% csrf_token %}
-                            <label class="inline-toggle">
-                                <input type="checkbox" name="brainrot_mode" value="1" {% if automation_state.brainrot_mode %}checked{% endif %} onchange="this.form.submit()">
-                                Dark Curiosity Mode
-                            </label>
-                        </form>
                         <div class="muted" style="margin-top: 8px;">
-                            {% if automation_state.brainrot_mode %}
-                                Dark Curiosity mode is active globally. New projects and automation runs will create dark mystery shorts only.
-                            {% else %}
-                                Multi-niche mode is active globally. New projects and automation runs will use your saved trending niches one by one.
-                            {% endif %}
+                            Automation uses your saved trending niches for both dashboard runs and scheduled project creation.
                         </div>
 
-                        <div id="niche-picker" class="niche-picker" {% if automation_state.brainrot_mode %}hidden{% endif %}>
+                        <div id="niche-picker" class="niche-picker">
                             <form method="post" action="{% url 'set-selected-niches' %}">
                                 {% csrf_token %}
                                 <div class="muted" style="margin-top: 14px;">Choose the niches you want the AI to use for trending video ideas across the dashboard and automation.</div>
@@ -825,7 +814,7 @@
                                 </div>
                                 <div class="selected-niche-list">
                                     {% for value in selected_niches %}
-                                        {% if value != 'dark-curiosity' or not automation_state.brainrot_mode %}
+                                        {% if value != 'dark-curiosity' %}
                                             <span class="badge badge-warn">
                                                 {% for niche_value, niche_label in niche_options %}{% if niche_value == value %}{{ niche_label }}{% endif %}{% endfor %}
                                             </span>
@@ -894,9 +883,7 @@
                             </form>
                             <form method="post" action="{% url 'start-new-project' %}">
                                 {% csrf_token %}
-                                <button class="btn btn-secondary" type="submit">
-                                    {% if automation_state.brainrot_mode %}Create Mystery Video{% else %}Create Videos From Saved Niches{% endif %}
-                                </button>
+                                <button class="btn btn-secondary" type="submit">Create Videos From Saved Niches</button>
                             </form>
                             <form method="post" action="{% url 'start-generate' %}">
                                 {% csrf_token %}
@@ -1184,7 +1171,6 @@
         const voiceDescription = document.getElementById("voice-description");
         const voiceSamplePlayer = document.getElementById("voice-sample-player");
         const playVoiceSampleButton = document.getElementById("play-voice-sample");
-        const brainrotModeToggle = document.querySelector('input[name="brainrot_mode"]');
         const nichePicker = document.getElementById("niche-picker");
 
         const badgeTone = (status) => {
@@ -1218,11 +1204,6 @@
         };
 
         const selectedVoiceOption = () => voiceSelect?.options?.[voiceSelect.selectedIndex] || null;
-
-        const syncBrainrotModeUi = () => {
-            if (!brainrotModeToggle || !nichePicker) return;
-            nichePicker.hidden = brainrotModeToggle.checked;
-        };
 
         const syncVoiceDescription = () => {
             const option = selectedVoiceOption();
@@ -1405,10 +1386,6 @@
         if (playVoiceSampleButton) {
             playVoiceSampleButton.addEventListener("click", playVoiceSample);
         }
-        if (brainrotModeToggle) {
-            brainrotModeToggle.addEventListener("change", syncBrainrotModeUi);
-        }
-        syncBrainrotModeUi();
         document.addEventListener("visibilitychange", () => scheduleDashboardRefresh("idle"));
         scheduleDashboardRefresh("idle");
     </script>
