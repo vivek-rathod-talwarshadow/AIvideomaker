@@ -6,7 +6,7 @@ from django.test.utils import override_settings
 from django.utils import timezone
 
 from studio.enums import ContentNiche, JobStatus, PlatformType
-from studio.models import ChannelProfile, PublishJob, VideoProject, ViralTopic
+from studio.models import AutomationState, ChannelProfile, PublishJob, VideoProject, ViralTopic
 from studio.services.pipeline import (
     _publish_job,
     _run_generation_task,
@@ -14,6 +14,7 @@ from studio.services.pipeline import (
     create_projects_for_niches,
     default_automation_niches,
     dispatch_due_work,
+    get_automation_state,
     normalize_selected_niches,
     process_due_work,
     selected_automation_niches,
@@ -308,6 +309,21 @@ class PipelineQueueTests(TestCase):
 
         self.assertEqual(selected_automation_niches(state), default_automation_niches())
         self.assertFalse(state.brainrot_mode)
+
+    def test_default_niches_include_every_visible_dashboard_niche(self) -> None:
+        expected = [choice.value for choice in ContentNiche if choice != ContentNiche.DARK_CURIOSITY]
+
+        self.assertEqual(default_automation_niches(), expected)
+
+    def test_legacy_three_niche_default_is_upgraded_to_all_visible_niches(self) -> None:
+        AutomationState.objects.create(
+            key="global",
+            selected_niches=[ContentNiche.ANIMALS, ContentNiche.CELEBRITY, ContentNiche.PSYCHOLOGY]
+        )
+
+        refreshed = get_automation_state()
+
+        self.assertEqual(refreshed.selected_niches, default_automation_niches())
 
     def test_create_projects_for_niches_creates_one_project_per_selected_niche(self) -> None:
         animal_topic = ViralTopic.objects.create(

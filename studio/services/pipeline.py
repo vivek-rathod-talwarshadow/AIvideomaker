@@ -153,11 +153,19 @@ def available_niche_choices() -> list[tuple[str, str]]:
     return [(choice.value, choice.label) for choice in ContentNiche]
 
 
-def default_automation_niches() -> list[str]:
+def legacy_default_automation_niches() -> list[str]:
     return [
         str(ContentNiche.ANIMALS),
         str(ContentNiche.CELEBRITY),
         str(ContentNiche.PSYCHOLOGY),
+    ]
+
+
+def default_automation_niches() -> list[str]:
+    return [
+        choice.value
+        for choice in ContentNiche
+        if choice != ContentNiche.DARK_CURIOSITY
     ]
 
 
@@ -351,6 +359,8 @@ def get_automation_state() -> AutomationState:
         },
     )
     normalized_niches = normalize_selected_niches(state.selected_niches)
+    if normalized_niches == legacy_default_automation_niches():
+        normalized_niches = default_automation_niches()
     if normalized_niches != list(state.selected_niches or []):
         state.selected_niches = normalized_niches or default_automation_niches()
         state.save(update_fields=["selected_niches", "updated_at"])
